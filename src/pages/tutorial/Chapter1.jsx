@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import * as THREE from "three";
-import { T, AXIS_NAME } from "../../lib/theme.js";
+import { AXIS_NAME, SCENE_BG, useTheme, useThemeControls } from "../../lib/theme.js";
 import { Viewport } from "../../components/AttitudeBench.jsx";
 import { normalizeQuat, canonicalQuat, quatToAxisAngle, DEG } from "../../lib/attitude.js";
 
@@ -13,6 +13,7 @@ const IDENTITY = [1, 0, 0, 0];
 const TILTED = canonicalQuat(normalizeQuat([0.8446, 0.1913, 0.4619, 0.1913]));
 
 function H2({ children }) {
+  const T = useTheme();
   return (
     <h2 style={{
       margin: "34px 0 10px", fontSize: 17, fontWeight: 600,
@@ -22,6 +23,7 @@ function H2({ children }) {
 }
 
 function P({ children, dim }) {
+  const T = useTheme();
   return (
     <p style={{
       margin: "0 0 11px", fontSize: 13.5, lineHeight: 1.72, color: dim ? T.dim : T.text,
@@ -30,6 +32,7 @@ function P({ children, dim }) {
 }
 
 function Term({ children, color }) {
+  const T = useTheme();
   return (
     <span style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: color || T.live }}>
       {children}
@@ -40,6 +43,7 @@ function Term({ children, color }) {
 /* ---------- the live frame demo ---------- */
 
 function FrameDemo() {
+  const { name, T } = useThemeControls();
   const [quat, setQuat] = useState(TILTED);
   const [showInertial, setShowInertial] = useState(true);
   const [highlight, setHighlight] = useState(null);
@@ -59,7 +63,7 @@ function FrameDemo() {
   return (
     <figure style={{ margin: "16px 0 4px" }}>
       <div style={{
-        position: "relative", background: "#080D12", border: `1px solid ${T.rule}`,
+        position: "relative", background: SCENE_BG[name], border: `1px solid ${T.rule}`,
         borderRadius: 3, height: "clamp(280px, 42vh, 400px)", overflow: "hidden",
       }}>
         <Viewport quat={quat} onDrag={onDrag} highlight={highlight} showInertial={showInertial} />
@@ -124,6 +128,7 @@ function FrameDemo() {
 /* ---------- attitude vs orbit ---------- */
 
 function OrbitVsAttitude() {
+  const T = useTheme();
   const craft = [
     { x: 68, y: 128, rot: 0 },
     { x: 310, y: 40, rot: 52 },
@@ -145,7 +150,7 @@ function OrbitVsAttitude() {
             stroke={T.rule} strokeWidth="1.5" strokeDasharray="5 5" />
 
           {/* central body */}
-          <circle cx="310" cy="128" r="30" fill="#101C27" stroke={T.faint} strokeWidth="1" />
+          <circle cx="310" cy="128" r="30" fill={T.panelHi} stroke={T.faint} strokeWidth="1" />
           <text x="310" y="132" textAnchor="middle" fill={T.faint}
             style={{ fontFamily: "var(--mono)", fontSize: 10 }}>planet</text>
 
@@ -185,24 +190,28 @@ function OrbitVsAttitude() {
 
 /* ---------- why it matters ---------- */
 
+/** Tones name a token; they are resolved against the live palette at render. */
+const tone = (T, k) => (k.startsWith("axis") ? T.axis[+k.slice(4)] : T[k]);
+
 const USES = [
-  ["Solar arrays", "Collected power falls off with the cosine of the sun angle. Point the arrays wrong for long enough and the bus browns out.", T.amber],
-  ["Antennas", "A high-gain dish has a beam a couple of degrees wide. Miss the ground station and the whole pass is lost.", T.live],
-  ["Sensors", "Cameras, star trackers and spectrometers only return data when the boresight is on target — and a star tracker must be kept off the sun.", T.axis[2]],
-  ["Thermal control", "Radiators need a view of deep space; instruments need shade. Which face bakes and which face freezes is an attitude decision.", T.axis[0]],
-  ["Thrusters", "A burn changes velocity along the thrust axis, so an orbit manoeuvre is only ever as accurate as the attitude that aimed it.", T.axis[1]],
+  ["Solar arrays", "Collected power falls off with the cosine of the sun angle. Point the arrays wrong for long enough and the bus browns out.", "amber"],
+  ["Antennas", "A high-gain dish has a beam a couple of degrees wide. Miss the ground station and the whole pass is lost.", "live"],
+  ["Sensors", "Cameras, star trackers and spectrometers only return data when the boresight is on target — and a star tracker must be kept off the sun.", "axis2"],
+  ["Thermal control", "Radiators need a view of deep space; instruments need shade. Which face bakes and which face freezes is an attitude decision.", "axis0"],
+  ["Thrusters", "A burn changes velocity along the thrust axis, so an orbit manoeuvre is only ever as accurate as the attitude that aimed it.", "axis1"],
 ];
 
 function UseGrid() {
+  const T = useTheme();
   return (
     <div className="c1-uses" style={{ display: "grid", gap: 8, marginTop: 14, marginBottom: 14 }}>
-      {USES.map(([title, blurb, tone]) => (
+      {USES.map(([title, blurb, toneKey]) => (
         <div key={title} style={{
           background: T.panel, border: `1px solid ${T.rule}`,
-          borderLeft: `2px solid ${tone}`, borderRadius: 2, padding: "10px 12px",
+          borderLeft: `2px solid ${tone(T, toneKey)}`, borderRadius: 2, padding: "10px 12px",
         }}>
           <div style={{
-            fontFamily: "var(--mono)", fontSize: 11, color: tone,
+            fontFamily: "var(--mono)", fontSize: 11, color: tone(T, toneKey),
             marginBottom: 4, letterSpacing: "0.04em",
           }}>{title}</div>
           <div style={{ fontSize: 12.5, color: T.dim, lineHeight: 1.6 }}>{blurb}</div>
@@ -215,6 +224,7 @@ function UseGrid() {
 /* ---------- chapter ---------- */
 
 export default function Chapter1() {
+  const T = useTheme();
   return (
     <article style={{ maxWidth: 720 }}>
       <style>{`

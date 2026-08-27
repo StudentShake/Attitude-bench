@@ -1,8 +1,10 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { T } from "../lib/theme.js";
+import { useTheme } from "../lib/theme.js";
 import { Page, Eyebrow } from "../components/SiteChrome.jsx";
 
+// `tone` names a token rather than holding a colour, so the table survives a
+// theme change — it is resolved against the live palette at render time.
 const CARDS = [
   {
     to: "/tutorial",
@@ -11,7 +13,7 @@ const CARDS = [
     blurb:
       "Work up from what attitude even is to the six ways of writing one down — what each representation buys you, and where each one breaks.",
     lede: "Start here",
-    tone: T.live,
+    tone: "live",
     ready: true,
   },
   {
@@ -21,7 +23,7 @@ const CARDS = [
     blurb:
       "One orientation, six coordinate sets, all live. Drag the spacecraft or type into any panel and watch the rest follow.",
     lede: "Open the bench",
-    tone: T.amber,
+    tone: "amber",
     ready: true,
   },
   {
@@ -31,12 +33,14 @@ const CARDS = [
     blurb:
       "Generated problems with worked solutions — conversions, sequences, gimbal lock, and the sign conventions that cost the most marks.",
     lede: "Coming soon",
-    tone: T.faint,
+    tone: "faint",
     ready: false,
   },
 ];
 
 function Card({ c }) {
+  const T = useTheme();
+  const tone = T[c.tone];
   const [hover, setHover] = React.useState(false);
   return (
     <Link
@@ -47,7 +51,7 @@ function Card({ c }) {
         textDecoration: "none", color: "inherit", display: "flex",
         flexDirection: "column", minHeight: 176,
         background: hover ? T.panelHi : T.panel,
-        border: `1px solid ${hover ? c.tone : T.rule}`,
+        border: `1px solid ${hover ? tone : T.rule}`,
         borderRadius: 3, padding: "15px 16px 16px",
         transition: "background .14s ease, border-color .14s ease, transform .14s ease",
         transform: hover ? "translateY(-2px)" : "none",
@@ -66,7 +70,7 @@ function Card({ c }) {
       }}>{c.blurb}</p>
       <div style={{
         marginTop: 14, fontFamily: "var(--mono)", fontSize: 11,
-        color: c.ready ? c.tone : T.faint,
+        color: c.ready ? tone : T.faint,
         display: "flex", alignItems: "center", gap: 6,
       }}>
         {c.lede}
@@ -77,6 +81,7 @@ function Card({ c }) {
 }
 
 export default function Landing() {
+  const T = useTheme();
   return (
     <Page>
       <style>{`

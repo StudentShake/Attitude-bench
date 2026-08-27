@@ -1,5 +1,5 @@
 import { Outlet, NavLink, Link, useLocation } from "react-router-dom";
-import { T } from "../../lib/theme.js";
+import { useTheme } from "../../lib/theme.js";
 import { Page } from "../../components/SiteChrome.jsx";
 import { CHAPTERS, chapterBySlug, neighbours } from "./chapters.js";
 
@@ -10,6 +10,7 @@ import { CHAPTERS, chapterBySlug, neighbours } from "./chapters.js";
    ========================================================================== */
 
 function ChapterLink({ c }) {
+  const T = useTheme();
   const row = (extra) => ({
     display: "grid", gridTemplateColumns: "22px minmax(0,1fr)", gap: 8,
     padding: "8px 9px", borderRadius: 2, textDecoration: "none",
@@ -57,6 +58,7 @@ function ChapterLink({ c }) {
 }
 
 function FootLink({ c, dir }) {
+  const T = useTheme();
   const label = dir === "prev" ? "← Previous" : "Next →";
   if (!c) return <span />;
   const inner = (
@@ -81,6 +83,7 @@ function FootLink({ c, dir }) {
 
 /** Placeholder body for a chapter slug that has no component yet. */
 export function ChapterStub() {
+  const T = useTheme();
   const slug = useLocation().pathname.split("/").filter(Boolean).pop();
   const c = chapterBySlug(slug);
   return (
@@ -107,6 +110,7 @@ export function ChapterStub() {
 }
 
 export default function TutorialLayout() {
+  const T = useTheme();
   const slug = useLocation().pathname.split("/").filter(Boolean).pop();
   const current = chapterBySlug(slug);
   const { prev, next } = neighbours(slug);

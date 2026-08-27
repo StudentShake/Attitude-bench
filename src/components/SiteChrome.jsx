@@ -1,5 +1,5 @@
 import { NavLink, Link } from "react-router-dom";
-import { T, MONO, SANS } from "../lib/theme.js";
+import { MONO, SANS, THEMES, THEME_LIST, useTheme, useThemeControls } from "../lib/theme.js";
 
 /* ============================================================================
    SITE CHROME
@@ -13,7 +13,49 @@ const SECTIONS = [
   { to: "/test-prep", label: "Test Prep" },
 ];
 
+/** Four swatches: the palette's own panel, rule and accent, drawn in itself. */
+export function ThemeSwitcher() {
+  const { name, setTheme } = useThemeControls();
+  const T = useTheme();
+
+  return (
+    <div role="group" aria-label="Colour theme" style={{ display: "flex", gap: 3 }}>
+      {THEME_LIST.map((t) => {
+        const active = t.name === name;
+        // the swatch is drawn in its OWN palette, not the active one
+        const own = THEMES[t.name];
+        return (
+          <button
+            key={t.name}
+            type="button"
+            onClick={() => setTheme(t.name)}
+            title={t.label}
+            aria-pressed={active}
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "4px 7px", borderRadius: 2, cursor: "pointer",
+              background: active ? T.panel : "transparent",
+              border: `1px solid ${active ? T.rule : "transparent"}`,
+              color: active ? T.text : T.dim,
+              fontFamily: "var(--sans)", fontSize: 11,
+            }}
+          >
+            <span aria-hidden="true" style={{
+              width: 11, height: 11, borderRadius: 2, flex: "0 0 auto",
+              background: `linear-gradient(135deg, ${own.panel} 0 50%, ${own.live} 50% 100%)`,
+              border: `1px solid ${own.rule}`,
+              boxShadow: active ? `0 0 0 1px ${T.live}` : "none",
+            }} />
+            <span className="thm-label">{t.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SiteNav() {
+  const T = useTheme();
   return (
     <nav style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -30,15 +72,18 @@ export function SiteNav() {
           ADCS
         </span>
       </Link>
-      <div style={{ display: "flex", gap: 4 }}>
-        {SECTIONS.map((s) => (
-          <NavLink key={s.to} to={s.to} style={({ isActive }) => ({
-            textDecoration: "none", fontSize: 11.5, padding: "5px 10px", borderRadius: 2,
-            border: `1px solid ${isActive ? T.rule : "transparent"}`,
-            background: isActive ? T.panel : "transparent",
-            color: isActive ? T.live : T.dim,
-          })}>{s.label}</NavLink>
-        ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {SECTIONS.map((s) => (
+            <NavLink key={s.to} to={s.to} style={({ isActive }) => ({
+              textDecoration: "none", fontSize: 11.5, padding: "5px 10px", borderRadius: 2,
+              border: `1px solid ${isActive ? T.rule : "transparent"}`,
+              background: isActive ? T.panel : "transparent",
+              color: isActive ? T.live : T.dim,
+            })}>{s.label}</NavLink>
+          ))}
+        </div>
+        <ThemeSwitcher />
       </div>
     </nav>
   );
@@ -46,6 +91,7 @@ export function SiteNav() {
 
 /** Outer shell: tokens, global rules, optional nav. */
 export function Page({ children, nav = true, pad = true }) {
+  const T = useTheme();
   return (
     <div style={{
       "--mono": MONO, "--sans": SANS,
@@ -58,6 +104,7 @@ export function Page({ children, nav = true, pad = true }) {
         }
         .ab-link { color: ${T.live}; text-decoration: none; border-bottom: 1px solid ${T.rule}; }
         .ab-link:hover { border-bottom-color: ${T.live}; }
+        @media (max-width: 700px) { .thm-label { display: none; } }
         @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
       `}</style>
       {nav && <SiteNav />}
@@ -70,6 +117,7 @@ export function Page({ children, nav = true, pad = true }) {
 
 /** Section heading used across tutorial + static pages. */
 export function Eyebrow({ children, color }) {
+  const T = useTheme();
   return (
     <div style={{
       fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "0.18em",

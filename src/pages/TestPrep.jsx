@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { T } from "../lib/theme.js";
+import { useTheme } from "../lib/theme.js";
 import { Page, Eyebrow } from "../components/SiteChrome.jsx";
 
 const PLANNED = [
@@ -10,6 +10,7 @@ const PLANNED = [
 ];
 
 export default function TestPrep() {
+  const T = useTheme();
   return (
     <Page>
       <div style={{ maxWidth: 720, margin: "0 auto", width: "100%", padding: "30px 0" }}>

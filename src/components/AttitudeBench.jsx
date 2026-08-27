@@ -8,7 +8,8 @@ import {
   DEG, RAD,
 } from "../lib/attitude.js";
 
-import { T, AXIS_NAME, MONO, SANS } from "../lib/theme.js";
+import { AXIS_NAME, MONO, SANS, SCENE_BG, useTheme, useThemeControls } from "../lib/theme.js";
+import Spoiler from "./Spoiler.jsx";
 
 const fmt = (v, p = 4) => {
   if (!isFinite(v)) return "—";
@@ -16,11 +17,22 @@ const fmt = (v, p = 4) => {
   return s === "-" + (0).toFixed(p) ? (0).toFixed(p) : s;
 };
 
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
 /* ============================================================================
    3D VIEWPORT
    ========================================================================== */
 
-export function Viewport({ quat, onDrag, highlight, showInertial }) {
+/* camera orbit limits — close enough to inspect a face, far enough to keep
+   the whole vehicle plus the 3.1-unit principal axis in frame */
+const DIST_MIN = 3.0;
+const DIST_MAX = 24;
+const EL_LIMIT = 1.5; // just short of the poles, where azimuth stops meaning anything
+const ARC_SEG = 40;
+const ARC_R = 0.9;
+
+export function Viewport({ quat, onDrag, highlight, showInertial, showPrincipalAxis = true }) {
+  const T = useTheme();
   const mountRef = useRef(null);
   const state = useRef({});
 
@@ -36,6 +48,7 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
     renderer.domElement.style.display = "block";
     renderer.domElement.style.touchAction = "none";
     renderer.domElement.style.cursor = "grab";
+    renderer.domElement.style.userSelect = "none";
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.55));
     const key = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -45,6 +58,9 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
     rim.position.set(-5, -2, -4);
     scene.add(rim);
 
+    // materials whose colour comes from the palette, repainted on theme change
+    const themed = { inertial: [], body: [], amber: [] };
+
     // ---- inertial reference frame (static, dim, dashed) ----
     const inertial = new THREE.Group();
     for (let a = 0; a < 3; a++) {
@@ -53,9 +69,9 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
       for (let s = 0; s <= 40; s++) pts.push(dir.clone().multiplyScalar((s / 40) * 2.6));
       const g = new THREE.BufferGeometry().setFromPoints(pts);
       const m = new THREE.LineDashedMaterial({
-        color: new THREE.Color(T.axis[a]), dashSize: 0.07, gapSize: 0.07,
-        transparent: true, opacity: 0.4,
+        dashSize: 0.07, gapSize: 0.07, transparent: true, opacity: 0.4,
       });
+      themed.inertial.push(m);
       const line = new THREE.Line(g, m);
       line.computeLineDistances();
       inertial.add(line);
@@ -99,7 +115,8 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
     for (let a = 0; a < 3; a++) {
       const dir = new THREE.Vector3(a === 0 ? 1 : 0, a === 1 ? 1 : 0, a === 2 ? 1 : 0);
       const grp = new THREE.Group();
-      const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(T.axis[a]) });
+      const mat = new THREE.MeshBasicMaterial();
+      themed.body.push(mat);
       const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 2.1, 12), mat);
       const head = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.22, 14), mat);
       shaft.position.y = 1.05;
@@ -113,23 +130,66 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
     scene.add(body);
 
     // ---- principal rotation axis (Euler axis) ----
-    const prvMat = new THREE.LineBasicMaterial({ color: 0xe9a13b, transparent: true, opacity: 0.85 });
+    const prvMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.85 });
+    themed.amber.push(prvMat);
     const prvLine = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), prvMat
     );
     scene.add(prvLine);
 
-    camera.position.set(4.4, 3.2, 5.0);
-    camera.lookAt(0, 0, 0);
+    // ---- swept-angle arc: Φ drawn as geometry, not just a number ----
+    const arcMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
+    themed.amber.push(arcMat);
+    const arcLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(
+        Array.from({ length: ARC_SEG + 1 }, () => new THREE.Vector3())
+      ), arcMat
+    );
+    scene.add(arcLine);
 
-    // ---- interaction: drag rotates the body in the inertial frame ----
-    let dragging = false, lastX = 0, lastY = 0;
+    const arcHeadMat = new THREE.MeshBasicMaterial();
+    themed.amber.push(arcHeadMat);
+    const arcHead = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 14), arcHeadMat);
+    scene.add(arcHead);
+
+    // ---- camera: spherical orbit about the origin ----
+    const orbit = { az: Math.atan2(4.4, 5.0), el: Math.asin(3.2 / Math.hypot(4.4, 3.2, 5.0)), dist: Math.hypot(4.4, 3.2, 5.0) };
+    const placeCamera = () => {
+      const ce = Math.cos(orbit.el);
+      camera.position.set(
+        orbit.dist * ce * Math.sin(orbit.az),
+        orbit.dist * Math.sin(orbit.el),
+        orbit.dist * ce * Math.cos(orbit.az)
+      );
+      camera.lookAt(0, 0, 0);
+    };
+    placeCamera();
+
+    // ---- interaction ----
+    // left / touch: rotates the spacecraft's attitude (unchanged)
+    // middle: orbits the camera, CAD style — the attitude does not move
+    let dragging = false, orbiting = false, lastX = 0, lastY = 0;
     const el = renderer.domElement;
+
     const down = (e) => {
+      if (e.button === 1) {
+        e.preventDefault(); // suppress the autoscroll puck
+        orbiting = true; lastX = e.clientX; lastY = e.clientY;
+        el.setPointerCapture(e.pointerId); el.style.cursor = "move";
+        return;
+      }
       dragging = true; lastX = e.clientX; lastY = e.clientY;
       el.setPointerCapture(e.pointerId); el.style.cursor = "grabbing";
     };
     const move = (e) => {
+      if (orbiting) {
+        const dx = e.clientX - lastX, dy = e.clientY - lastY;
+        lastX = e.clientX; lastY = e.clientY;
+        orbit.az -= dx * 0.007;
+        orbit.el = clamp(orbit.el + dy * 0.007, -EL_LIMIT, EL_LIMIT);
+        placeCamera();
+        return;
+      }
       if (!dragging) return;
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
@@ -141,13 +201,26 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
       state.current.onDrag && state.current.onDrag(dq);
     };
     const up = (e) => {
-      dragging = false; el.style.cursor = "grab";
+      dragging = false; orbiting = false; el.style.cursor = "grab";
       try { el.releasePointerCapture(e.pointerId); } catch { /* pointer already released */ }
     };
+    const wheel = (e) => {
+      e.preventDefault();
+      orbit.dist = clamp(orbit.dist * Math.exp(e.deltaY * 0.0012), DIST_MIN, DIST_MAX);
+      placeCamera();
+    };
+    // belt and braces against middle-click autoscroll: pointerdown's
+    // preventDefault suppresses the compatibility mousedown in most engines,
+    // and auxclick covers the release.
+    const noMiddle = (e) => { if (e.button === 1) e.preventDefault(); };
+
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("mousedown", noMiddle);
+    el.addEventListener("auxclick", noMiddle);
 
     const resize = () => {
       const w = mount.clientWidth, h = mount.clientHeight;
@@ -164,7 +237,10 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
     const loop = () => { renderer.render(scene, camera); raf = requestAnimationFrame(loop); };
     loop();
 
-    state.current = { ...state.current, body, bodyAxes, inertial, prvLine, scene };
+    state.current = {
+      ...state.current,
+      body, bodyAxes, inertial, prvLine, arcLine, arcHead, scene, camera, orbit, themed,
+    };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -173,12 +249,24 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("mousedown", noMiddle);
+      el.removeEventListener("auxclick", noMiddle);
       renderer.dispose();
       if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
     };
   }, []);
 
   useEffect(() => { state.current.onDrag = onDrag; }, [onDrag]);
+
+  // scene colours track the palette; the scene itself is never rebuilt
+  useEffect(() => {
+    const s = state.current.themed;
+    if (!s) return;
+    s.inertial.forEach((m, i) => m.color.set(T.axis[i]));
+    s.body.forEach((m, i) => m.color.set(T.axis[i]));
+    s.amber.forEach((m) => m.color.set(T.amber));
+  }, [T]);
 
   // attitude q maps inertial->body, so the mesh (body->inertial) gets the conjugate
   useEffect(() => {
@@ -193,7 +281,34 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
       worldAxis.clone().multiplyScalar(-len), worldAxis.clone().multiplyScalar(len),
     ]);
     s.prvLine.geometry.attributes.position.needsUpdate = true;
-  }, [quat]);
+
+    // the arc sweeps from a fixed reference in the plane normal to the axis
+    // round to where that reference actually ended up, so its length reads Φ.
+    // The mesh carries the conjugate of q, hence the negative sweep.
+    const drawArc = Math.abs(angle) > 1e-3 && worldAxis.lengthSq() > 1e-9;
+    if (drawArc) {
+      const n = worldAxis.clone().normalize();
+      // any stable perpendicular: world up, unless the axis is nearly parallel to it
+      const ref = Math.abs(n.y) > 0.94 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+      const v0 = new THREE.Vector3().crossVectors(ref, n).normalize().multiplyScalar(ARC_R);
+      const sweep = -angle;
+      const pts = [];
+      for (let i = 0; i <= ARC_SEG; i++) {
+        pts.push(v0.clone().applyAxisAngle(n, (sweep * i) / ARC_SEG));
+      }
+      s.arcLine.geometry.setFromPoints(pts);
+      s.arcLine.geometry.attributes.position.needsUpdate = true;
+
+      const end = pts[ARC_SEG];
+      const tangent = new THREE.Vector3().crossVectors(n, end).normalize().multiplyScalar(Math.sign(sweep));
+      s.arcHead.position.copy(end);
+      s.arcHead.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+    }
+
+    s.prvLine.visible = showPrincipalAxis;
+    s.arcLine.visible = showPrincipalAxis && drawArc;
+    s.arcHead.visible = showPrincipalAxis && drawArc;
+  }, [quat, showPrincipalAxis]);
 
   useEffect(() => {
     const s = state.current;
@@ -216,7 +331,8 @@ export function Viewport({ quat, onDrag, highlight, showInertial }) {
    UI PRIMITIVES
    ========================================================================== */
 
-function Panel({ label, note, children, tone }) {
+function Panel({ label, note, children, tone, action }) {
+  const T = useTheme();
   return (
     <section style={{
       background: T.panel, border: `1px solid ${tone || T.rule}`,
@@ -230,14 +346,34 @@ function Panel({ label, note, children, tone }) {
           margin: 0, fontSize: 10.5, letterSpacing: "0.16em", textTransform: "uppercase",
           color: T.dim, fontWeight: 600,
         }}>{label}</h2>
-        {note && <span style={{ fontSize: 10, color: tone || T.faint, fontFamily: "var(--mono)" }}>{note}</span>}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          {note && <span style={{ fontSize: 10, color: tone || T.faint, fontFamily: "var(--mono)" }}>{note}</span>}
+          {action}
+        </div>
       </header>
       {children}
     </section>
   );
 }
 
+/** Per-panel spoiler switch. Small, quiet, and off by default. */
+function HideToggle({ on, onChange }) {
+  const T = useTheme();
+  return (
+    <label style={{
+      display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
+      fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.12em",
+      textTransform: "uppercase", color: on ? T.live : T.faint,
+    }}>
+      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)}
+        style={{ accentColor: T.live, width: 11, height: 11 }} />
+      quiz me
+    </label>
+  );
+}
+
 function NumField({ value, onCommit, color, width = "100%", align = "right" }) {
+  const T = useTheme();
   const [draft, setDraft] = useState(null);
   const shown = draft !== null ? draft : value;
   return (
@@ -252,7 +388,8 @@ function NumField({ value, onCommit, color, width = "100%", align = "right" }) {
       }}
       spellCheck={false}
       style={{
-        width, background: draft !== null ? "#0d1a20" : T.panelHi,
+        // an uncommitted draft sits a shade back from a settled value
+        width, background: draft !== null ? T.panel : T.panelHi,
         border: `1px solid ${draft !== null ? T.live : T.rule}`,
         color: color || T.text, fontFamily: "var(--mono)", fontSize: 12.5,
         padding: "5px 7px", borderRadius: 2, textAlign: align, outline: "none",
@@ -267,16 +404,27 @@ function NumField({ value, onCommit, color, width = "100%", align = "right" }) {
    ========================================================================== */
 
 export default function AttitudeBench() {
+  const { name: themeName, T } = useThemeControls();
+
   const [quat, setQuat] = useState(() =>
     canonicalQuat(normalizeQuat([0.8446, 0.1913, 0.4619, 0.1913]))
   );
   const [seqIdx, setSeqIdx] = useState(5); // 3-2-1
   const [highlight, setHighlight] = useState(null);
   const [showInertial, setShowInertial] = useState(true);
+  const [showPrincipalAxis, setShowPrincipalAxis] = useState(true);
   const [scalarFirst, setScalarFirst] = useState(true);
   const [bodyToInertial, setBodyToInertial] = useState(false);
   const [showWork, setShowWork] = useState(false);
   const [useShadow, setUseShadow] = useState(false);
+
+  // per-panel spoiler flags
+  const [hidden, setHidden] = useState({
+    euler: false, rodrigues: false, quat: false, dcm: false, axisAngle: false,
+  });
+  const toggleHidden = useCallback(
+    (k) => (on) => setHidden((h) => ({ ...h, [k]: on })), []
+  );
 
   const seq = SEQUENCES[seqIdx];
   const C = useMemo(() => quatToDCM(quat), [quat]);
@@ -286,6 +434,9 @@ export default function AttitudeBench() {
   const crp = useMemo(() => quatToCRP(quat), [quat]);
   const mrpBase = useMemo(() => quatToMRP(quat), [quat]);
   const mrp = useShadow && mrpBase ? mrpShadow(mrpBase) : mrpBase;
+
+  // any change to the attitude re-hides every panel that is in quiz mode
+  const resetKey = useMemo(() => quat.join(","), [quat]);
 
   const set = useCallback((q) => setQuat(canonicalQuat(normalizeQuat(q))), []);
 
@@ -307,6 +458,8 @@ export default function AttitudeBench() {
 
   const qLabels = scalarFirst ? ["q₀", "q₁", "q₂", "q₃"] : ["q₁", "q₂", "q₃", "q₄"];
   const qOrder = scalarFirst ? [0, 1, 2, 3] : [1, 2, 3, 0];
+
+  const checkbox = { accentColor: T.live, width: 12, height: 12 };
 
   return (
     <div style={{
@@ -357,11 +510,14 @@ export default function AttitudeBench() {
         {/* ================= LEFT: viewport ================= */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
           <div style={{
-            position: "relative", background: "#080D12",
+            position: "relative", background: SCENE_BG[themeName],
             border: `1px solid ${T.rule}`, borderRadius: 3,
             height: "clamp(320px, 46vh, 480px)", overflow: "hidden",
           }}>
-            <Viewport quat={quat} onDrag={onDrag} highlight={highlight} showInertial={showInertial} />
+            <Viewport
+              quat={quat} onDrag={onDrag} highlight={highlight}
+              showInertial={showInertial} showPrincipalAxis={showPrincipalAxis}
+            />
             <div style={{
               position: "absolute", left: 11, bottom: 10, display: "flex", gap: 13,
               fontFamily: "var(--mono)", fontSize: 10.5, pointerEvents: "none",
@@ -371,78 +527,102 @@ export default function AttitudeBench() {
                   {n}<span style={{ color: T.faint }}>_body</span>
                 </span>
               ))}
-              <span style={{ color: T.amber }}>Euler axis</span>
+              {showPrincipalAxis && <span style={{ color: T.amber }}>Euler axis · Φ</span>}
             </div>
-            <label style={{
-              position: "absolute", right: 11, bottom: 10, fontSize: 10.5,
-              color: T.dim, display: "flex", gap: 5, alignItems: "center", cursor: "pointer",
+            <div style={{
+              position: "absolute", right: 11, top: 10, fontFamily: "var(--mono)",
+              fontSize: 9.5, color: T.faint, pointerEvents: "none", textAlign: "right",
+              lineHeight: 1.5,
             }}>
-              <input type="checkbox" checked={showInertial}
-                onChange={(e) => setShowInertial(e.target.checked)}
-                style={{ accentColor: T.live, width: 12, height: 12 }} />
-              inertial frame
-            </label>
+              drag · rotate<br />middle-drag · orbit<br />wheel · zoom
+            </div>
+            <div style={{
+              position: "absolute", right: 11, bottom: 10, display: "flex", gap: 12,
+              alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end",
+            }}>
+              <label style={{
+                fontSize: 10.5, color: T.dim, display: "flex", gap: 5,
+                alignItems: "center", cursor: "pointer",
+              }}>
+                <input type="checkbox" checked={showPrincipalAxis}
+                  onChange={(e) => setShowPrincipalAxis(e.target.checked)}
+                  style={checkbox} />
+                principal axis
+              </label>
+              <label style={{
+                fontSize: 10.5, color: T.dim, display: "flex", gap: 5,
+                alignItems: "center", cursor: "pointer",
+              }}>
+                <input type="checkbox" checked={showInertial}
+                  onChange={(e) => setShowInertial(e.target.checked)}
+                  style={checkbox} />
+                inertial frame
+              </label>
+            </div>
           </div>
 
           {/* ---- DCM: the signature panel ---- */}
           <Panel
             label="Direction cosine matrix"
             note={bodyToInertial ? "Cᵀ · v_body = v_inertial" : "C · v_inertial = v_body"}
+            action={<HideToggle on={hidden.dcm} onChange={toggleHidden("dcm")} />}
           >
             <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-              <div>
-                {/* column headers — body axes only when we are showing Cᵀ */}
-                <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
-                  <div style={{ width: 22 }} />
-                  {[0, 1, 2].map((c) => (
-                    <div key={c}
-                      onMouseEnter={() => bodyToInertial && setHighlight(c)}
-                      onMouseLeave={() => setHighlight(null)}
-                      style={{
-                        width: 76, textAlign: "center", fontFamily: "var(--mono)",
-                        fontSize: 9.5, letterSpacing: "0.06em",
-                        color: bodyToInertial ? T.axis[c] : T.faint,
-                        cursor: bodyToInertial ? "help" : "default",
-                      }}>
-                      {bodyToInertial ? `${AXIS_NAME[c]}_b` : `col ${c + 1}`}
-                    </div>
-                  ))}
-                </div>
-
-                {[0, 1, 2].map((r) => (
-                  <div key={r} style={{ display: "flex", gap: 3, marginBottom: 3, alignItems: "center" }}>
-                    {/* row label — body axes in the default inertial → body sense */}
-                    <div
-                      onMouseEnter={() => !bodyToInertial && setHighlight(r)}
-                      onMouseLeave={() => setHighlight(null)}
-                      style={{
-                        width: 22, textAlign: "right", paddingRight: 4, fontFamily: "var(--mono)",
-                        fontSize: 9.5, color: bodyToInertial ? T.faint : T.axis[r],
-                        cursor: bodyToInertial ? "default" : "help",
-                      }}>
-                      {bodyToInertial ? `row ${r + 1}` : `${AXIS_NAME[r]}_b`}
-                    </div>
+              <Spoiler hidden={hidden.dcm} resetKey={resetKey}>
+                <div>
+                  {/* column headers — body axes only when we are showing Cᵀ */}
+                  <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
+                    <div style={{ width: 22 }} />
                     {[0, 1, 2].map((c) => (
                       <div key={c}
-                        onMouseEnter={() => setHighlight(bodyToInertial ? c : r)}
+                        onMouseEnter={() => bodyToInertial && setHighlight(c)}
                         onMouseLeave={() => setHighlight(null)}
-                        style={{ width: 76, cursor: "help" }}>
-                        <NumField
-                          value={fmt(Cdisp[r][c])}
-                          color={bodyToInertial ? T.axis[c] : T.axis[r]}
-                          onCommit={(v) => {
-                            if (!isFinite(v)) return;
-                            const N = Cdisp.map((row) => row.slice());
-                            N[r][c] = v;
-                            const fixed = orthonormalize(N);
-                            set(dcmToQuat(bodyToInertial ? transpose(fixed) : fixed));
-                          }}
-                        />
+                        style={{
+                          width: 76, textAlign: "center", fontFamily: "var(--mono)",
+                          fontSize: 9.5, letterSpacing: "0.06em",
+                          color: bodyToInertial ? T.axis[c] : T.faint,
+                          cursor: bodyToInertial ? "help" : "default",
+                        }}>
+                        {bodyToInertial ? `${AXIS_NAME[c]}_b` : `col ${c + 1}`}
                       </div>
                     ))}
                   </div>
-                ))}
-              </div>
+
+                  {[0, 1, 2].map((r) => (
+                    <div key={r} style={{ display: "flex", gap: 3, marginBottom: 3, alignItems: "center" }}>
+                      {/* row label — body axes in the default inertial → body sense */}
+                      <div
+                        onMouseEnter={() => !bodyToInertial && setHighlight(r)}
+                        onMouseLeave={() => setHighlight(null)}
+                        style={{
+                          width: 22, textAlign: "right", paddingRight: 4, fontFamily: "var(--mono)",
+                          fontSize: 9.5, color: bodyToInertial ? T.faint : T.axis[r],
+                          cursor: bodyToInertial ? "default" : "help",
+                        }}>
+                        {bodyToInertial ? `row ${r + 1}` : `${AXIS_NAME[r]}_b`}
+                      </div>
+                      {[0, 1, 2].map((c) => (
+                        <div key={c}
+                          onMouseEnter={() => setHighlight(bodyToInertial ? c : r)}
+                          onMouseLeave={() => setHighlight(null)}
+                          style={{ width: 76, cursor: "help" }}>
+                          <NumField
+                            value={fmt(Cdisp[r][c])}
+                            color={bodyToInertial ? T.axis[c] : T.axis[r]}
+                            onCommit={(v) => {
+                              if (!isFinite(v)) return;
+                              const N = Cdisp.map((row) => row.slice());
+                              N[r][c] = v;
+                              const fixed = orthonormalize(N);
+                              set(dcmToQuat(bodyToInertial ? transpose(fixed) : fixed));
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </Spoiler>
 
               <p style={{ margin: 0, fontSize: 11, color: T.dim, maxWidth: 210, lineHeight: 1.5 }}>
                 {bodyToInertial
@@ -461,35 +641,41 @@ export default function AttitudeBench() {
         <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
 
           {/* ---- quaternion ---- */}
-          <Panel label="Quaternion" note={scalarFirst ? "scalar first" : "scalar last"}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
-              {qOrder.map((qi, slot) => (
-                <div key={slot}>
-                  <div style={{
-                    fontFamily: "var(--mono)", fontSize: 10, color: qi === 0 ? T.amber : T.dim,
-                    marginBottom: 3,
-                  }}>{qLabels[slot]}</div>
-                  <NumField
-                    value={fmt(quat[qi], 5)}
-                    onCommit={(v) => {
-                      if (!isFinite(v)) return;
-                      const n = quat.slice(); n[qi] = v; set(n);
-                    }}
-                  />
-                </div>
-              ))}
-            </div>
+          <Panel
+            label="Quaternion"
+            note={scalarFirst ? "scalar first" : "scalar last"}
+            action={<HideToggle on={hidden.quat} onChange={toggleHidden("quat")} />}
+          >
+            <Spoiler hidden={hidden.quat} resetKey={resetKey}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+                {qOrder.map((qi, slot) => (
+                  <div key={slot}>
+                    <div style={{
+                      fontFamily: "var(--mono)", fontSize: 10, color: qi === 0 ? T.amber : T.dim,
+                      marginBottom: 3,
+                    }}>{qLabels[slot]}</div>
+                    <NumField
+                      value={fmt(quat[qi], 5)}
+                      onCommit={(v) => {
+                        if (!isFinite(v)) return;
+                        const n = quat.slice(); n[qi] = v; set(n);
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </Spoiler>
             <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
               <label style={{ fontSize: 11, color: T.dim, display: "flex", gap: 5, cursor: "pointer" }}>
                 <input type="checkbox" checked={scalarFirst}
                   onChange={(e) => setScalarFirst(e.target.checked)}
-                  style={{ accentColor: T.live, width: 12, height: 12 }} />
+                  style={checkbox} />
                 scalar first
               </label>
               <label style={{ fontSize: 11, color: T.dim, display: "flex", gap: 5, cursor: "pointer" }}>
                 <input type="checkbox" checked={bodyToInertial}
                   onChange={(e) => setBodyToInertial(e.target.checked)}
-                  style={{ accentColor: T.live, width: 12, height: 12 }} />
+                  style={checkbox} />
                 body → inertial sense
               </label>
               <button onClick={() => setShowWork(!showWork)} style={{
@@ -498,53 +684,65 @@ export default function AttitudeBench() {
               }}>{showWork ? "hide" : "show"} the substitution</button>
             </div>
             {showWork && (
-              <pre style={{
-                margin: "9px 0 0", padding: 9, background: "#0A1218",
-                border: `1px solid ${T.rule}`, borderRadius: 2, fontFamily: "var(--mono)",
-                fontSize: 10.5, color: T.dim, overflowX: "auto", lineHeight: 1.65,
-              }}>
+              <Spoiler hidden={hidden.quat} resetKey={resetKey}>
+                <pre style={{
+                  margin: "9px 0 0", padding: 9, background: T.panelHi,
+                  border: `1px solid ${T.rule}`, borderRadius: 2, fontFamily: "var(--mono)",
+                  fontSize: 10.5, color: T.dim, overflowX: "auto", lineHeight: 1.65,
+                }}>
 {`C₁₁ = q₀²+q₁²−q₂²−q₃²  = ${fmt(quat[0])}² + ${fmt(quat[1])}² − ${fmt(quat[2])}² − ${fmt(quat[3])}²
                         = ${fmt(C[0][0])}
 C₁₂ = 2(q₁q₂ + q₀q₃)    = 2(${fmt(quat[1])}·${fmt(quat[2])} + ${fmt(quat[0])}·${fmt(quat[3])})
                         = ${fmt(C[0][1])}
 C₁₃ = 2(q₁q₃ − q₀q₂)    = ${fmt(C[0][2])}
 ‖q‖ = ${fmt(Math.hypot(...quat), 8)}   (unit norm is what makes C orthogonal)`}
-              </pre>
+                </pre>
+              </Spoiler>
             )}
           </Panel>
 
           {/* ---- principal rotation (axis-angle) ---- */}
-          <Panel label="Principal rotation" note={pa.degenerate ? "axis undefined at Φ = 0" : "Euler's theorem"}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr) 1.15fr", gap: 6 }}>
-              {[0, 1, 2].map((i) => (
-                <div key={i}>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: T.axis[i], marginBottom: 3 }}>
-                    e{"₁₂₃"[i]}
+          <Panel
+            label="Principal rotation"
+            note={pa.degenerate ? "axis undefined at Φ = 0" : "Euler's theorem"}
+            action={<HideToggle on={hidden.axisAngle} onChange={toggleHidden("axisAngle")} />}
+          >
+            <Spoiler hidden={hidden.axisAngle} resetKey={resetKey}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr) 1.15fr", gap: 6 }}>
+                {[0, 1, 2].map((i) => (
+                  <div key={i}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: T.axis[i], marginBottom: 3 }}>
+                      e{"₁₂₃"[i]}
+                    </div>
+                    <NumField value={fmt(pa.axis[i], 5)} color={T.axis[i]}
+                      onCommit={(v) => {
+                        if (!isFinite(v)) return;
+                        const a = pa.axis.slice(); a[i] = v;
+                        set(axisAngleToQuat(a, pa.angle));
+                      }} />
                   </div>
-                  <NumField value={fmt(pa.axis[i], 5)} color={T.axis[i]}
-                    onCommit={(v) => {
-                      if (!isFinite(v)) return;
-                      const a = pa.axis.slice(); a[i] = v;
-                      set(axisAngleToQuat(a, pa.angle));
-                    }} />
+                ))}
+                <div>
+                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: T.amber, marginBottom: 3 }}>Φ °</div>
+                  <NumField value={fmt(pa.angle * DEG, 3)} color={T.amber}
+                    onCommit={(v) => isFinite(v) && set(axisAngleToQuat(pa.axis, v * RAD))} />
                 </div>
-              ))}
-              <div>
-                <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: T.amber, marginBottom: 3 }}>Φ °</div>
-                <NumField value={fmt(pa.angle * DEG, 3)} color={T.amber}
-                  onCommit={(v) => isFinite(v) && set(axisAngleToQuat(pa.axis, v * RAD))} />
               </div>
-            </div>
+            </Spoiler>
             <p style={{ margin: "8px 0 0", fontSize: 11, color: T.faint, lineHeight: 1.5 }}>
-              However tangled the orientation looks, it is one turn of Φ about the amber line in the viewport.
+              However tangled the orientation looks, it is one turn of Φ about the amber line in the
+              viewport — the amber arc is that turn, swept out.
             </p>
           </Panel>
 
           {/* ---- Euler angles ---- */}
           <Panel
             label="Euler angles"
-            note={eu.gimbalLock ? "GIMBAL LOCK" : `${(eu.distanceToLock * DEG).toFixed(1)}° from singularity`}
+            note={hidden.euler
+              ? "hidden"
+              : eu.gimbalLock ? "GIMBAL LOCK" : `${(eu.distanceToLock * DEG).toFixed(1)}° from singularity`}
             tone={lockTone}
+            action={<HideToggle on={hidden.euler} onChange={toggleHidden("euler")} />}
           >
             <div style={{ display: "flex", gap: 6, alignItems: "flex-end", marginBottom: 8, flexWrap: "wrap" }}>
               <div style={{ flex: "0 0 auto" }}>
@@ -561,24 +759,30 @@ C₁₃ = 2(q₁q₃ − q₀q₂)    = ${fmt(C[0][2])}
                   ))}
                 </select>
               </div>
-              {[0, 1, 2].map((n) => (
-                <div key={n} style={{ flex: "1 1 62px", minWidth: 62 }}>
-                  <div style={{
-                    fontFamily: "var(--mono)", fontSize: 10, marginBottom: 3,
-                    color: n === 1 ? (lockTone || T.dim) : T.axis[seq[n] - 1],
-                  }}>
-                    {["θ₁", "θ₂", "θ₃"][n]} <span style={{ color: T.faint }}>/{seq[n]}</span>
+              <div style={{ flex: "1 1 200px", minWidth: 190 }}>
+                <Spoiler hidden={hidden.euler} resetKey={resetKey}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
+                    {[0, 1, 2].map((n) => (
+                      <div key={n} style={{ flex: "1 1 62px", minWidth: 0 }}>
+                        <div style={{
+                          fontFamily: "var(--mono)", fontSize: 10, marginBottom: 3,
+                          color: n === 1 ? (lockTone || T.dim) : T.axis[seq[n] - 1],
+                        }}>
+                          {["θ₁", "θ₂", "θ₃"][n]} <span style={{ color: T.faint }}>/{seq[n]}</span>
+                        </div>
+                        <NumField
+                          value={fmt(eu.angles[n] * DEG, 3)}
+                          color={n === 1 ? (lockTone || T.text) : T.axis[seq[n] - 1]}
+                          onCommit={(v) => {
+                            if (!isFinite(v)) return;
+                            const a = eu.angles.slice(); a[n] = v * RAD;
+                            set(eulerToQuat(a, seq));
+                          }} />
+                      </div>
+                    ))}
                   </div>
-                  <NumField
-                    value={fmt(eu.angles[n] * DEG, 3)}
-                    color={n === 1 ? (lockTone || T.text) : T.axis[seq[n] - 1]}
-                    onCommit={(v) => {
-                      if (!isFinite(v)) return;
-                      const a = eu.angles.slice(); a[n] = v * RAD;
-                      set(eulerToQuat(a, seq));
-                    }} />
-                </div>
-              ))}
+                </Spoiler>
+              </div>
             </div>
 
             {/* singularity meter */}
@@ -600,30 +804,36 @@ C₁₃ = 2(q₁q₃ − q₀q₂)    = ${fmt(C[0][2])}
           </Panel>
 
           {/* ---- Rodrigues family ---- */}
-          <Panel label="Rodrigues parameters" note="minimal, 3 numbers">
-            <div style={{ display: "grid", gridTemplateColumns: "58px repeat(3, 1fr)", gap: 6, alignItems: "center" }}>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: T.dim }}>CRP q</span>
-              {crp
-                ? crp.map((v, i) => (
-                    <NumField key={i} value={fmt(v, 4)} color={T.axis[i]}
-                      onCommit={(nv) => { if (!isFinite(nv)) return; const p = crp.slice(); p[i] = nv; set(crpToQuat(p)); }} />
-                  ))
-                : <div style={{
-                    gridColumn: "2 / 5", fontFamily: "var(--mono)", fontSize: 11.5,
-                    color: T.axis[0], padding: "5px 0",
-                  }}>→ ±∞  singular at Φ = 180°</div>}
+          <Panel
+            label="Rodrigues parameters"
+            note="minimal, 3 numbers"
+            action={<HideToggle on={hidden.rodrigues} onChange={toggleHidden("rodrigues")} />}
+          >
+            <Spoiler hidden={hidden.rodrigues} resetKey={resetKey}>
+              <div style={{ display: "grid", gridTemplateColumns: "58px repeat(3, 1fr)", gap: 6, alignItems: "center" }}>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: T.dim }}>CRP q</span>
+                {crp
+                  ? crp.map((v, i) => (
+                      <NumField key={i} value={fmt(v, 4)} color={T.axis[i]}
+                        onCommit={(nv) => { if (!isFinite(nv)) return; const p = crp.slice(); p[i] = nv; set(crpToQuat(p)); }} />
+                    ))
+                  : <div style={{
+                      gridColumn: "2 / 5", fontFamily: "var(--mono)", fontSize: 11.5,
+                      color: T.axis[0], padding: "5px 0",
+                    }}>→ ±∞  singular at Φ = 180°</div>}
 
-              <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: T.dim }}>MRP σ</span>
-              {mrp
-                ? mrp.map((v, i) => (
-                    <NumField key={i} value={fmt(v, 4)} color={T.axis[i]}
-                      onCommit={(nv) => { if (!isFinite(nv)) return; const s = mrp.slice(); s[i] = nv; set(mrpToQuat(s)); }} />
-                  ))
-                : <div style={{
-                    gridColumn: "2 / 5", fontFamily: "var(--mono)", fontSize: 11.5,
-                    color: T.axis[0], padding: "5px 0",
-                  }}>→ ±∞  singular at Φ = 360°</div>}
-            </div>
+                <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: T.dim }}>MRP σ</span>
+                {mrp
+                  ? mrp.map((v, i) => (
+                      <NumField key={i} value={fmt(v, 4)} color={T.axis[i]}
+                        onCommit={(nv) => { if (!isFinite(nv)) return; const s = mrp.slice(); s[i] = nv; set(mrpToQuat(s)); }} />
+                    ))
+                  : <div style={{
+                      gridColumn: "2 / 5", fontFamily: "var(--mono)", fontSize: 11.5,
+                      color: T.axis[0], padding: "5px 0",
+                    }}>→ ±∞  singular at Φ = 360°</div>}
+              </div>
+            </Spoiler>
             <div style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
               gap: 10, marginTop: 8, flexWrap: "wrap",
@@ -640,7 +850,8 @@ C₁₃ = 2(q₁q₃ − q₀q₂)    = ${fmt(C[0][2])}
                 cursor: mrpBase ? "pointer" : "not-allowed", fontFamily: "var(--sans)",
               }}>
                 {useShadow ? "shadow set" : "principal set"}
-                {mrp && ` · |σ| = ${fmt(Math.hypot(...mrp), 3)}`}
+                {/* the magnitude is an answer too, so it goes quiet in quiz mode */}
+                {mrp && !hidden.rodrigues && ` · |σ| = ${fmt(Math.hypot(...mrp), 3)}`}
               </button>
             </div>
           </Panel>
