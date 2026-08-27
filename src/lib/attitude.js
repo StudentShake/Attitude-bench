@@ -179,7 +179,8 @@ export const eulerToQuat = (angles, seq) => dcmToQuat(eulerToDCM(angles, seq));
 export function dcmToEuler(C, seq) {
   const [i, j, k] = seq;
   const clamp = (x) => Math.max(-1, Math.min(1, x));
-  let t1, t2, t3, gimbalLock = false, distanceToLock;
+  // gimbalLock and distanceToLock are set on both branches below before any read
+  let t1, t2, t3, gimbalLock, distanceToLock;
 
   if (!isProper(seq)) {
     // Tait-Bryan: middle angle singular at +/- 90 deg
