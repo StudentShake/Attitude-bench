@@ -1,30 +1,14 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import * as THREE from "three";
 import {
   quatToDCM, dcmToQuat, quatToAxisAngle, axisAngleToQuat,
   quatToCRP, crpToQuat, quatToMRP, mrpShadow, mrpToQuat,
-  SEQUENCES, isProper, eulerToDCM, eulerToQuat, dcmToEuler,
+  SEQUENCES, isProper, eulerToQuat, dcmToEuler,
   orthonormalize, transpose, normalizeQuat, canonicalQuat,
   DEG, RAD,
 } from "../lib/attitude.js";
 
-/* ============================================================================
-   DESIGN TOKENS
-   ========================================================================== */
-
-const T = {
-  deep: "#0B1016",
-  panel: "#121B24",
-  panelHi: "#18242F",
-  rule: "#233240",
-  text: "#CFDBE4",
-  dim: "#6E828F",
-  faint: "#3F5361",
-  amber: "#E9A13B",
-  live: "#67E8DC",
-  axis: ["#FF5D6C", "#4FD98A", "#5C93FF"],
-};
-const AXIS_NAME = ["x", "y", "z"];
+import { T, AXIS_NAME, MONO, SANS } from "../lib/theme.js";
 
 const fmt = (v, p = 4) => {
   if (!isFinite(v)) return "—";
@@ -36,7 +20,7 @@ const fmt = (v, p = 4) => {
    3D VIEWPORT
    ========================================================================== */
 
-function Viewport({ quat, onDrag, highlight, showInertial }) {
+export function Viewport({ quat, onDrag, highlight, showInertial }) {
   const mountRef = useRef(null);
   const state = useRef({});
 
@@ -158,7 +142,7 @@ function Viewport({ quat, onDrag, highlight, showInertial }) {
     };
     const up = (e) => {
       dragging = false; el.style.cursor = "grab";
-      try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+      try { el.releasePointerCapture(e.pointerId); } catch { /* pointer already released */ }
     };
     el.addEventListener("pointerdown", down);
     el.addEventListener("pointermove", move);
@@ -326,13 +310,11 @@ export default function AttitudeBench() {
 
   return (
     <div style={{
-      "--mono": "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace",
-      "--sans": "'IBM Plex Sans', system-ui, -apple-system, sans-serif",
+      "--mono": MONO, "--sans": SANS,
       background: T.deep, color: T.text, fontFamily: "var(--sans)",
       minHeight: "100%", padding: "18px 20px 26px",
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
         input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         input:focus { border-color: ${T.live} !important; }
         button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid ${T.live}; outline-offset: 1px; }
@@ -409,29 +391,45 @@ export default function AttitudeBench() {
           >
             <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
               <div>
+                {/* column headers — body axes only when we are showing Cᵀ */}
                 <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
+                  <div style={{ width: 22 }} />
                   {[0, 1, 2].map((c) => (
-                    <div key={c} onMouseEnter={() => !bodyToInertial && setHighlight(c)}
+                    <div key={c}
+                      onMouseEnter={() => bodyToInertial && setHighlight(c)}
                       onMouseLeave={() => setHighlight(null)}
                       style={{
                         width: 76, textAlign: "center", fontFamily: "var(--mono)",
-                        fontSize: 9.5, color: bodyToInertial ? T.faint : T.axis[c],
-                        letterSpacing: "0.06em", cursor: bodyToInertial ? "default" : "help",
+                        fontSize: 9.5, letterSpacing: "0.06em",
+                        color: bodyToInertial ? T.axis[c] : T.faint,
+                        cursor: bodyToInertial ? "help" : "default",
                       }}>
-                      {bodyToInertial ? `col ${c + 1}` : `${AXIS_NAME[c]}_b`}
+                      {bodyToInertial ? `${AXIS_NAME[c]}_b` : `col ${c + 1}`}
                     </div>
                   ))}
                 </div>
+
                 {[0, 1, 2].map((r) => (
-                  <div key={r} style={{ display: "flex", gap: 3, marginBottom: 3 }}>
+                  <div key={r} style={{ display: "flex", gap: 3, marginBottom: 3, alignItems: "center" }}>
+                    {/* row label — body axes in the default inertial → body sense */}
+                    <div
+                      onMouseEnter={() => !bodyToInertial && setHighlight(r)}
+                      onMouseLeave={() => setHighlight(null)}
+                      style={{
+                        width: 22, textAlign: "right", paddingRight: 4, fontFamily: "var(--mono)",
+                        fontSize: 9.5, color: bodyToInertial ? T.faint : T.axis[r],
+                        cursor: bodyToInertial ? "default" : "help",
+                      }}>
+                      {bodyToInertial ? `row ${r + 1}` : `${AXIS_NAME[r]}_b`}
+                    </div>
                     {[0, 1, 2].map((c) => (
                       <div key={c}
-                        onMouseEnter={() => !bodyToInertial && setHighlight(c)}
+                        onMouseEnter={() => setHighlight(bodyToInertial ? c : r)}
                         onMouseLeave={() => setHighlight(null)}
-                        style={{ width: 76 }}>
+                        style={{ width: 76, cursor: "help" }}>
                         <NumField
                           value={fmt(Cdisp[r][c])}
-                          color={bodyToInertial ? T.text : T.axis[c]}
+                          color={bodyToInertial ? T.axis[c] : T.axis[r]}
                           onCommit={(v) => {
                             if (!isFinite(v)) return;
                             const N = Cdisp.map((row) => row.slice());
@@ -445,12 +443,11 @@ export default function AttitudeBench() {
                   </div>
                 ))}
               </div>
-              <p style={{
-                margin: 0, fontSize: 11, color: T.dim, maxWidth: 210, lineHeight: 1.5,
-              }}>
+
+              <p style={{ margin: 0, fontSize: 11, color: T.dim, maxWidth: 210, lineHeight: 1.5 }}>
                 {bodyToInertial
-                  ? "In this sense the rows are the body axes written in inertial components. Flip the convention to colour them."
-                  : "Each column is one body axis written in inertial components — hover a column to see it light up in the viewport. That is the whole meaning of the matrix."}
+                  ? "This is Cᵀ, so the body axes have moved into the columns — each column is one body axis in inertial components. Hover a column to light it up."
+                  : "C maps inertial → body, so each row is one body axis written in inertial components — hover a row to see it light up in the viewport. That's the whole meaning of the matrix."}
                 <br />
                 <span style={{ color: T.faint }}>
                   Typed values are re-orthonormalised, so a hand-entered matrix always lands on a real rotation.
