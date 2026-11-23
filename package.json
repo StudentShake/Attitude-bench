@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "node src/lib/attitude.test.mjs && node src/lib/course.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
