@@ -1,41 +1,43 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { ThemeContext, THEMES, DEFAULT_THEME, THEME_KEY, MODE } from "../lib/theme.js";
+import { ThemeContext, THEMES, THEME_KEY, LEGACY } from "../lib/theme.js";
 
-/* ============================================================================
-   THEME PROVIDER
-   Holds the active palette name, persists it, and keeps <body> in step so the
-   overscroll gutter and the native form controls match the page.
-   ========================================================================== */
-
-function storedTheme() {
+function initialMode() {
   try {
     const saved = localStorage.getItem(THEME_KEY);
-    return saved && THEMES[saved] ? saved : DEFAULT_THEME;
+    if (saved === "dark" || saved === "light") return saved;
+    if (saved && LEGACY[saved]) return LEGACY[saved];
   } catch {
-    return DEFAULT_THEME; // storage blocked (private mode, embedded frame)
+    /* storage blocked; fall through to the OS preference */
+  }
+  try {
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  } catch {
+    return "dark";
   }
 }
 
+/** Every token becomes a CSS custom property, so stylesheets and JS agree. */
+function applyVars(T) {
+  const r = document.documentElement;
+  r.dataset.theme = T.mode;
+  r.style.colorScheme = T.mode;
+  const set = (k, v) => r.style.setProperty(k, v);
+  ["bg", "bg2", "card", "cardHi", "line", "text", "dim", "faint", "scene", "sceneEdge",
+    "primary", "onPrimary", "inertial"].forEach((k) => set(`--${k}`, T[k]));
+  T.axis.forEach((c, i) => set(`--ax${i}`, c));
+  Object.entries(T.rep).forEach(([k, c]) => set(`--${k}`, c));
+}
+
 export default function ThemeProvider({ children }) {
-  const [name, setName] = useState(storedTheme);
+  const [mode, setMode] = useState(initialMode);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(THEME_KEY, name);
-    } catch {
-      /* not persisting is survivable; the session still themes correctly */
-    }
-    const t = THEMES[name];
-    document.documentElement.style.colorScheme = MODE[name];
-    document.body.style.background = t.deep;
-    document.body.style.color = t.text;
-  }, [name]);
+    applyVars(THEMES[mode]);
+    try { localStorage.setItem(THEME_KEY, mode); } catch { /* fine without it */ }
+  }, [mode]);
 
-  const setTheme = useCallback((next) => {
-    if (THEMES[next]) setName(next);
-  }, []);
-
-  const value = useMemo(() => ({ name, T: THEMES[name], setTheme }), [name, setTheme]);
+  const toggle = useCallback(() => setMode((m) => (m === "dark" ? "light" : "dark")), []);
+  const value = useMemo(() => ({ mode, T: THEMES[mode], toggle }), [mode, toggle]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

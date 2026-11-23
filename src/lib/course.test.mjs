@@ -5,6 +5,7 @@
 //     longhand in course.js, checked against the library over random attitudes.
 import * as A from './attitude.js';
 import * as C from './course.js';
+import * as D from './director.js';
 
 let pass = 0, fail = 0;
 const check = (name, cond, info = '') => {
@@ -128,6 +129,45 @@ for (const seq of A.SEQUENCES) {
     if (!inRange || err > 1e-9) { ok = false; info = JSON.stringify({ ea, err }); }
   }
   check(`EA ${seq.join('-')}`, ok, info);
+}
+
+console.log('--- the 3D model shows row i of [Q] as body axis i (2000 random) ---');
+for (let k = 0; k < 2000; k++) {
+  const qLib = randQuat();
+  const Q = A.quatToDCM(qLib);
+  const m = C.meshQuat(qLib);
+  const ok = [0, 1, 2].every((i) => {
+    const e = [0, 0, 0]; e[i] = 1;
+    return vdiff(C.rotateByXYZW(m, e), Q[i]) < 1e-12;
+  });
+  check('model axes = rows of Q', ok);
+}
+{
+  // yaw 90° (3-2-1, α = 90): the body x axis has to be drawn along inertial +Y
+  const m = C.meshQuat(A.dcmToQuat(C.EAToQ(90, 0, 0, [3, 2, 1])));
+  check('yaw 90: drawn x_B along +Y', vdiff(C.rotateByXYZW(m, [1, 0, 0]), [0, 1, 0]) < 1e-12);
+}
+
+console.log('--- animations land exactly on the attitude they describe ---');
+for (const seq of A.SEQUENCES) {
+  for (let k = 0; k < 40; k++) {
+    const ang = [rnd() * 360, A.isProper(seq) ? 5 + rnd() * 170 : rnd() * 170 - 85, rnd() * 360];
+    const end = D.eulerFrame(seq, ang, 3);
+    check(`euler play ${seq.join('-')} ends on target`, maxDiff(A.quatToDCM(end.quat), C.EAToQ(ang[0], ang[1], ang[2], seq)) < 1e-9);
+    const one = D.eulerFrame(seq, ang, 1);
+    check(`euler play ${seq.join('-')} after step 1`, maxDiff(A.quatToDCM(one.quat), C.EAToQ(ang[0], 0, 0, seq)) < 1e-9);
+    const two = D.eulerFrame(seq, ang, 2);
+    check(`euler play ${seq.join('-')} after step 2`, maxDiff(A.quatToDCM(two.quat), C.EAToQ(ang[0], ang[1], 0, seq)) < 1e-9);
+  }
+}
+for (let k = 0; k < 200; k++) {
+  const qLib = randQuat();
+  const { axis, angle } = A.quatToAxisAngle(qLib);
+  const end = D.sarFrame(axis, angle * A.DEG, 1);
+  check('single turn ends on target', maxDiff(A.quatToDCM(end.quat), A.quatToDCM(qLib)) < 1e-9);
+  const q2 = randQuat();
+  check('slerp endpoints', maxDiff(A.quatToDCM(D.slerp(qLib, q2, 0)), A.quatToDCM(qLib)) < 1e-9 &&
+    maxDiff(A.quatToDCM(D.slerp(qLib, q2, 1)), A.quatToDCM(q2)) < 1e-9);
 }
 
 console.log('--- edge cases ---');

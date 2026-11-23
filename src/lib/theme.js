@@ -1,113 +1,80 @@
 import { createContext, useContext } from "react";
 
-/* ============================================================================
-   DESIGN TOKENS
-   Four palettes, one shape. Every colour the site draws comes from the token
-   object handed out by useTheme() — nothing reads a palette directly, so
-   adding a fifth theme means adding it here and nowhere else.
-   ========================================================================== */
+/* Two palettes, one shape. CSS reads the same values as custom properties
+   (set by ThemeProvider); Three.js and inline SVG read them from useTheme(). */
 
-/** The original dark theme. */
-export const OBSIDIAN = {
-  deep: "#0B1016",
-  panel: "#121B24",
-  panelHi: "#18242F",
-  rule: "#233240",
-  text: "#CFDBE4",
-  dim: "#6E828F",
-  faint: "#3F5361",
-  amber: "#E9A13B",
-  live: "#67E8DC",
-  axis: ["#FF5D6C", "#4FD98A", "#5C93FF"],
+const shared = {
+  // one colour per representation, used in 3D, cards, tutorial and practice
+  rep: null,
+  axis: null,
 };
 
-export const DAYLIGHT = {
-  deep: "#F7F8FA",
-  panel: "#FFFFFF",
-  panelHi: "#EEF1F4",
-  rule: "#D8DEE4",
-  text: "#1B2530",
-  dim: "#5B6B78",
-  faint: "#8FA0AC",
-  amber: "#C97A1E",
-  live: "#0E8C82",
-  axis: ["#D1394A", "#1F9A57", "#2F5FD1"],
+export const DARK = {
+  ...shared,
+  mode: "dark",
+  bg: "#0D1322",
+  bg2: "#111A2E",
+  card: "#16203A",
+  cardHi: "#1E2A48",
+  line: "#2A3858",
+  text: "#EEF2FA",
+  dim: "#A6B1CB",
+  faint: "#6D7A99",
+  scene: "#0A1020",
+  sceneEdge: "#16213B",
+  primary: "#FFC53D",
+  onPrimary: "#1A1405",
+  axis: ["#FF6B6B", "#4ADE80", "#5FA8FF"],
+  rep: { dcm: "#B197FC", euler: "#3BD5F0", sar: "#FFC53D", quat: "#F783C6" },
+  inertial: "#8C97B5",
+  craft: { bus: 0xd9a441, foil: 0xb07d22, panel: 0x2852a8, frame: 0xc9d2e3, dish: 0xeef2f8 },
 };
 
-export const SLATE = {
-  deep: "#0D1420",
-  panel: "#131C2B",
-  panelHi: "#1B2740",
-  rule: "#2A3A52",
-  text: "#D7E1EC",
-  dim: "#7488A0",
-  faint: "#405872",
-  amber: "#F2B84B",
-  live: "#59C4F5",
-  axis: ["#FF6F91", "#57D9A3", "#7FA8FF"],
+export const LIGHT = {
+  ...shared,
+  mode: "light",
+  bg: "#FBF8F2",
+  bg2: "#F5F0E7",
+  card: "#FFFFFF",
+  cardHi: "#F6F1E8",
+  line: "#E7DFD2",
+  text: "#1B2133",
+  dim: "#566079",
+  faint: "#949BAD",
+  scene: "#EEF2F9",
+  sceneEdge: "#DCE3EF",
+  primary: "#F5B301",
+  onPrimary: "#1B1404",
+  axis: ["#E5484D", "#16A05A", "#2F6FEB"],
+  rep: { dcm: "#7B57F5", euler: "#0B9DBA", sar: "#D48A00", quat: "#D6337F" },
+  inertial: "#7D869C",
+  craft: { bus: 0xd8a23a, foil: 0xa8741c, panel: 0x2852a8, frame: 0xb9c3d6, dish: 0xffffff },
 };
 
-export const SEPIA = {
-  deep: "#EFE7D8",
-  panel: "#FBF7EE",
-  panelHi: "#F2EADB",
-  rule: "#DCCFB4",
-  text: "#2C2417",
-  dim: "#756B57",
-  faint: "#A5987C",
-  amber: "#B5651D",
-  live: "#1E7A72",
-  axis: ["#B23A48", "#3D7A45", "#35538F"],
-};
-
-export const THEMES = { obsidian: OBSIDIAN, daylight: DAYLIGHT, slate: SLATE, sepia: SEPIA };
-
-export const DEFAULT_THEME = "obsidian";
+export const THEMES = { dark: DARK, light: LIGHT };
 export const THEME_KEY = "attitude-bench:theme";
 
-/**
- * Per-theme facts that are not colour tokens: `mode` drives the browser's
- * color-scheme (form controls, scrollbars), `scene` is the flat backdrop
- * behind the 3D viewport, which needs to sit a shade beyond `deep`.
- */
-export const THEME_LIST = [
-  { name: "obsidian", label: "Obsidian", mode: "dark", scene: "#080D12" },
-  { name: "daylight", label: "Daylight", mode: "light", scene: "#E9EDF2" },
-  { name: "slate", label: "Slate", mode: "dark", scene: "#080E17" },
-  { name: "sepia", label: "Sepia", mode: "light", scene: "#E4DAC5" },
-];
+/** Older builds stored one of four palette names. Map them onto the two left. */
+export const LEGACY = { obsidian: "dark", slate: "dark", daylight: "light", sepia: "light" };
 
-const byName = Object.fromEntries(THEME_LIST.map((t) => [t.name, t]));
+export const ThemeContext = createContext({ mode: "dark", T: DARK, toggle: () => {} });
 
-export const MODE = Object.fromEntries(THEME_LIST.map((t) => [t.name, t.mode]));
-export const SCENE_BG = Object.fromEntries(THEME_LIST.map((t) => [t.name, t.scene]));
-
-export const isLight = (name) => byName[name]?.mode === "light";
-
-/* ---------- context ---------- */
-
-export const ThemeContext = createContext({
-  name: DEFAULT_THEME,
-  T: THEMES[DEFAULT_THEME],
-  setTheme: () => {},
-});
-
-/** The token object for the active theme — what nearly every component wants. */
+/** Token object for the active theme. */
 export function useTheme() {
   return useContext(ThemeContext).T;
 }
 
-/** Name + setter + tokens, for the switcher and the two scene backdrops. */
+/** Mode + toggle + tokens. */
 export function useThemeControls() {
   return useContext(ThemeContext);
 }
 
-/* ---------- type ---------- */
-
 export const AXIS_NAME = ["x", "y", "z"];
 
-export const MONO = "'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace";
-export const SANS = "'IBM Plex Sans', system-ui, -apple-system, sans-serif";
-
-/** Spread onto any root element that needs the type stack. */
-export const FONT_VARS = { "--mono": MONO, "--sans": SANS };
+/** Representation metadata, in the order the course teaches them. */
+export const REPS = [
+  { key: "dcm", name: "DCM", symbol: "[Q]", long: "Direction cosine matrix", count: 9 },
+  { key: "euler", name: "Euler angles", symbol: "α β γ", long: "Euler angles", count: 3 },
+  { key: "sar", name: "SAR", symbol: "û, θ", long: "Single-axis rotation", count: 4 },
+  { key: "quat", name: "Quaternion", symbol: "q", long: "Quaternion", count: 4 },
+];

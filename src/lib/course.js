@@ -174,3 +174,29 @@ export const seqKind = (seq) => (isProper(seq) ? "symmetric" : "asymmetric");
 
 /** Slide nicknames (14 Jul slide 9). */
 export const SEQ_NICKNAME = { "3-2-1": "yaw, pitch, roll", "3-1-3": "classical Euler" };
+
+/* ---------- drawing ---------- */
+
+/**
+ * Quaternion for the 3D model, in three.js [x, y, z, w] order.
+ * The model is drawn in inertial coordinates, so it needs the ACTIVE rotation
+ * that carries the inertial axes onto the body axes. That rotation is Qᵀ, and
+ * for the library's quaternion it is q itself (not its conjugate): rotating
+ * x̂ by it lands on row 1 of [Q]. course.test.mjs checks this.
+ */
+export const meshQuat = (qLib) => {
+  const q = normalizeQuat(qLib);
+  return [q[1], q[2], q[3], q[0]];
+};
+
+/** Rotate v by a unit quaternion in [x, y, z, w] order (active, Hamilton). */
+export function rotateByXYZW(qx, v) {
+  const [x, y, z, w] = qx;
+  // t = 2 (q_vec × v);  v' = v + w t + q_vec × t
+  const t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+  return [
+    v[0] + w * t[0] + (y * t[2] - z * t[1]),
+    v[1] + w * t[1] + (z * t[0] - x * t[2]),
+    v[2] + w * t[2] + (x * t[1] - y * t[0]),
+  ];
+}

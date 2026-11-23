@@ -1,869 +1,512 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
-import {
-  quatToDCM, dcmToQuat, quatToAxisAngle, axisAngleToQuat,
-  quatToCRP, crpToQuat, quatToMRP, mrpShadow, mrpToQuat,
-  SEQUENCES, isProper, eulerToQuat, dcmToEuler,
-  orthonormalize, transpose, normalizeQuat, canonicalQuat,
-  DEG, RAD,
-} from "../lib/attitude.js";
-
-import { AXIS_NAME, MONO, SANS, SCENE_BG, useTheme, useThemeControls } from "../lib/theme.js";
+import Viewport from "./Viewport.jsx";
+import NumField from "./NumField.jsx";
 import Spoiler from "./Spoiler.jsx";
+import { RepCard, Label } from "./RepCard.jsx";
+import { Reset, Dice, Play, Pause, Flip } from "./Icons.jsx";
+import { SEQUENCES, isProper, canonicalQuat, normalizeQuat, orthonormalize, dcmToQuat } from "../lib/attitude.js";
+import {
+  quatToQ, QToEA, EAToQ, QToSAR, SARToQuat, toCourseQuat, fromCourseQuat, SEQ_NICKNAME, seqName,
+} from "../lib/course.js";
+import { eulerFrame, sarFrame, slerp } from "../lib/director.js";
+import { useTheme } from "../lib/theme.js";
+
+/* ============================================================================
+   PLAYGROUND
+   One attitude, held as a library quaternion. Every card is derived from it
+   through course.js, and every card can set it.
+   ========================================================================== */
 
 const fmt = (v, p = 4) => {
   if (!isFinite(v)) return "—";
   const s = v.toFixed(p);
-  return s === "-" + (0).toFixed(p) ? (0).toFixed(p) : s;
+  return /^-0\.?0*$/.test(s) ? s.slice(1) : s;
 };
 
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const SEQ_321 = 5; // index of [3, 2, 1] in SEQUENCES
+// The 15 Jul slide example (α 30°, β 20°, γ 10°, 3-2-1), so the first numbers
+// anyone sees are the ones on the slide.
+const START = canonicalQuat(dcmToQuat(EAToQ(30, 20, 10, [3, 2, 1])));
+const IDENTITY = [1, 0, 0, 0];
 
-/* ============================================================================
-   3D VIEWPORT
-   ========================================================================== */
+const reduceMotion = () => {
+  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+};
+const coarse = () => {
+  try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }
+};
 
-/* camera orbit limits — close enough to inspect a face, far enough to keep
-   the whole vehicle plus the 3.1-unit principal axis in frame */
-const DIST_MIN = 3.0;
-const DIST_MAX = 24;
-const EL_LIMIT = 1.5; // just short of the poles, where azimuth stops meaning anything
-const ARC_SEG = 40;
-const ARC_R = 0.9;
+/** Which axis a step turns about, in the slides' frame names: Z, then y₁, then x₂. */
+function stepAxisName(seq, k) {
+  const a = seq[k] - 1;
+  if (k === 0) return { letter: "XYZ"[a], sub: "" };
+  return { letter: "xyz"[a], sub: String(k) };
+}
 
-export function Viewport({ quat, onDrag, highlight, showInertial, showPrincipalAxis = true }) {
-  const T = useTheme();
-  const mountRef = useRef(null);
-  const state = useRef({});
+function AxisName({ seq, k }) {
+  const { letter, sub } = stepAxisName(seq, k);
+  return <span className="m">{letter}{sub && <sub style={{ fontStyle: "normal", fontSize: "0.7em" }}>{sub}</sub>}</span>;
+}
 
-  useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
+const GREEK = ["α", "β", "γ"];
 
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    mount.appendChild(renderer.domElement);
-    renderer.domElement.style.display = "block";
-    renderer.domElement.style.touchAction = "none";
-    renderer.domElement.style.cursor = "grab";
-    renderer.domElement.style.userSelect = "none";
+/* ---------- URL state, so a link reproduces the attitude ---------- */
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const key = new THREE.DirectionalLight(0xffffff, 0.9);
-    key.position.set(4, 6, 5);
-    scene.add(key);
-    const rim = new THREE.DirectionalLight(0x5c93ff, 0.35);
-    rim.position.set(-5, -2, -4);
-    scene.add(rim);
-
-    // materials whose colour comes from the palette, repainted on theme change
-    const themed = { inertial: [], body: [], amber: [] };
-
-    // ---- inertial reference frame (static, dim, dashed) ----
-    const inertial = new THREE.Group();
-    for (let a = 0; a < 3; a++) {
-      const dir = new THREE.Vector3(a === 0 ? 1 : 0, a === 1 ? 1 : 0, a === 2 ? 1 : 0);
-      const pts = [];
-      for (let s = 0; s <= 40; s++) pts.push(dir.clone().multiplyScalar((s / 40) * 2.6));
-      const g = new THREE.BufferGeometry().setFromPoints(pts);
-      const m = new THREE.LineDashedMaterial({
-        dashSize: 0.07, gapSize: 0.07, transparent: true, opacity: 0.4,
-      });
-      themed.inertial.push(m);
-      const line = new THREE.Line(g, m);
-      line.computeLineDistances();
-      inertial.add(line);
-    }
-    scene.add(inertial);
-
-    // ---- spacecraft body ----
-    const body = new THREE.Group();
-    const bus = new THREE.Mesh(
-      new THREE.BoxGeometry(1.05, 0.95, 1.25),
-      new THREE.MeshStandardMaterial({ color: 0xb9c6d1, metalness: 0.55, roughness: 0.42 })
-    );
-    body.add(bus);
-    const panelMat = new THREE.MeshStandardMaterial({
-      color: 0x1b3a63, metalness: 0.75, roughness: 0.3,
-      side: THREE.DoubleSide, emissive: 0x081726, emissiveIntensity: 0.6,
-    });
-    [-1, 1].forEach((s) => {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.03, 0.86), panelMat);
-      p.position.set(s * 1.62, 0, 0);
-      body.add(p);
-      const boom = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.035, 0.6, 10),
-        new THREE.MeshStandardMaterial({ color: 0x8d9aa5, metalness: 0.7, roughness: 0.4 })
-      );
-      boom.rotation.z = Math.PI / 2;
-      boom.position.set(s * 0.82, 0, 0);
-      body.add(boom);
-    });
-    // dish marks +z so the body's orientation is never ambiguous
-    const dish = new THREE.Mesh(
-      new THREE.ConeGeometry(0.42, 0.34, 24, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0xd8e2ea, metalness: 0.4, roughness: 0.5, side: THREE.DoubleSide })
-    );
-    dish.rotation.x = -Math.PI / 2;
-    dish.position.set(0, 0, 0.82);
-    body.add(dish);
-
-    // ---- body-fixed triad (solid, bright, labelled) ----
-    const bodyAxes = [];
-    for (let a = 0; a < 3; a++) {
-      const dir = new THREE.Vector3(a === 0 ? 1 : 0, a === 1 ? 1 : 0, a === 2 ? 1 : 0);
-      const grp = new THREE.Group();
-      const mat = new THREE.MeshBasicMaterial();
-      themed.body.push(mat);
-      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 2.1, 12), mat);
-      const head = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.22, 14), mat);
-      shaft.position.y = 1.05;
-      head.position.y = 2.2;
-      grp.add(shaft, head);
-      grp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-      grp.userData = { mat, shaft, head };
-      bodyAxes.push(grp);
-      body.add(grp);
-    }
-    scene.add(body);
-
-    // ---- principal rotation axis (Euler axis) ----
-    const prvMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.85 });
-    themed.amber.push(prvMat);
-    const prvLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), prvMat
-    );
-    scene.add(prvLine);
-
-    // ---- swept-angle arc: Φ drawn as geometry, not just a number ----
-    const arcMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.9 });
-    themed.amber.push(arcMat);
-    const arcLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(
-        Array.from({ length: ARC_SEG + 1 }, () => new THREE.Vector3())
-      ), arcMat
-    );
-    scene.add(arcLine);
-
-    const arcHeadMat = new THREE.MeshBasicMaterial();
-    themed.amber.push(arcHeadMat);
-    const arcHead = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 14), arcHeadMat);
-    scene.add(arcHead);
-
-    // ---- camera: spherical orbit about the origin ----
-    const orbit = { az: Math.atan2(4.4, 5.0), el: Math.asin(3.2 / Math.hypot(4.4, 3.2, 5.0)), dist: Math.hypot(4.4, 3.2, 5.0) };
-    const placeCamera = () => {
-      const ce = Math.cos(orbit.el);
-      camera.position.set(
-        orbit.dist * ce * Math.sin(orbit.az),
-        orbit.dist * Math.sin(orbit.el),
-        orbit.dist * ce * Math.cos(orbit.az)
-      );
-      camera.lookAt(0, 0, 0);
-    };
-    placeCamera();
-
-    // ---- interaction ----
-    // left / touch: rotates the spacecraft's attitude (unchanged)
-    // middle: orbits the camera, CAD style — the attitude does not move
-    let dragging = false, orbiting = false, lastX = 0, lastY = 0;
-    const el = renderer.domElement;
-
-    const down = (e) => {
-      if (e.button === 1) {
-        e.preventDefault(); // suppress the autoscroll puck
-        orbiting = true; lastX = e.clientX; lastY = e.clientY;
-        el.setPointerCapture(e.pointerId); el.style.cursor = "move";
-        return;
+function readURL() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const out = {};
+    const q = p.get("q");
+    if (q) {
+      const c = q.split(",").map(Number);
+      if (c.length === 4 && c.every(isFinite) && Math.hypot(...c) > 1e-6) {
+        out.quat = canonicalQuat(normalizeQuat(fromCourseQuat(c)));
       }
-      dragging = true; lastX = e.clientX; lastY = e.clientY;
-      el.setPointerCapture(e.pointerId); el.style.cursor = "grabbing";
-    };
-    const move = (e) => {
-      if (orbiting) {
-        const dx = e.clientX - lastX, dy = e.clientY - lastY;
-        lastX = e.clientX; lastY = e.clientY;
-        orbit.az -= dx * 0.007;
-        orbit.el = clamp(orbit.el + dy * 0.007, -EL_LIMIT, EL_LIMIT);
-        placeCamera();
-        return;
-      }
-      if (!dragging) return;
-      const dx = e.clientX - lastX, dy = e.clientY - lastY;
-      lastX = e.clientX; lastY = e.clientY;
-      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
-      const dq = new THREE.Quaternion()
-        .setFromAxisAngle(up, dx * 0.008)
-        .multiply(new THREE.Quaternion().setFromAxisAngle(right, dy * 0.008));
-      state.current.onDrag && state.current.onDrag(dq);
-    };
-    const up = (e) => {
-      dragging = false; orbiting = false; el.style.cursor = "grab";
-      try { el.releasePointerCapture(e.pointerId); } catch { /* pointer already released */ }
-    };
-    const wheel = (e) => {
-      e.preventDefault();
-      orbit.dist = clamp(orbit.dist * Math.exp(e.deltaY * 0.0012), DIST_MIN, DIST_MAX);
-      placeCamera();
-    };
-    // belt and braces against middle-click autoscroll: pointerdown's
-    // preventDefault suppresses the compatibility mousedown in most engines,
-    // and auxclick covers the release.
-    const noMiddle = (e) => { if (e.button === 1) e.preventDefault(); };
-
-    el.addEventListener("pointerdown", down);
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up);
-    el.addEventListener("pointercancel", up);
-    el.addEventListener("wheel", wheel, { passive: false });
-    el.addEventListener("mousedown", noMiddle);
-    el.addEventListener("auxclick", noMiddle);
-
-    const resize = () => {
-      const w = mount.clientWidth, h = mount.clientHeight;
-      if (!w || !h) return;
-      renderer.setSize(w, h, false);
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-    };
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(mount);
-
-    let raf;
-    const loop = () => { renderer.render(scene, camera); raf = requestAnimationFrame(loop); };
-    loop();
-
-    state.current = {
-      ...state.current,
-      body, bodyAxes, inertial, prvLine, arcLine, arcHead, scene, camera, orbit, themed,
-    };
-
-    return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      el.removeEventListener("pointerdown", down);
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
-      el.removeEventListener("pointercancel", up);
-      el.removeEventListener("wheel", wheel);
-      el.removeEventListener("mousedown", noMiddle);
-      el.removeEventListener("auxclick", noMiddle);
-      renderer.dispose();
-      if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement);
-    };
-  }, []);
-
-  useEffect(() => { state.current.onDrag = onDrag; }, [onDrag]);
-
-  // scene colours track the palette; the scene itself is never rebuilt
-  useEffect(() => {
-    const s = state.current.themed;
-    if (!s) return;
-    s.inertial.forEach((m, i) => m.color.set(T.axis[i]));
-    s.body.forEach((m, i) => m.color.set(T.axis[i]));
-    s.amber.forEach((m) => m.color.set(T.amber));
-  }, [T]);
-
-  // attitude q maps inertial->body, so the mesh (body->inertial) gets the conjugate
-  useEffect(() => {
-    const s = state.current;
-    if (!s.body) return;
-    s.body.quaternion.set(-quat[1], -quat[2], -quat[3], quat[0]);
-
-    const { axis, angle } = quatToAxisAngle(quat);
-    const worldAxis = new THREE.Vector3(axis[0], axis[1], axis[2]).applyQuaternion(s.body.quaternion);
-    const len = Math.abs(angle) < 1e-4 ? 0 : 3.1;
-    s.prvLine.geometry.setFromPoints([
-      worldAxis.clone().multiplyScalar(-len), worldAxis.clone().multiplyScalar(len),
-    ]);
-    s.prvLine.geometry.attributes.position.needsUpdate = true;
-
-    // the arc sweeps from a fixed reference in the plane normal to the axis
-    // round to where that reference actually ended up, so its length reads Φ.
-    // The mesh carries the conjugate of q, hence the negative sweep.
-    const drawArc = Math.abs(angle) > 1e-3 && worldAxis.lengthSq() > 1e-9;
-    if (drawArc) {
-      const n = worldAxis.clone().normalize();
-      // any stable perpendicular: world up, unless the axis is nearly parallel to it
-      const ref = Math.abs(n.y) > 0.94 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
-      const v0 = new THREE.Vector3().crossVectors(ref, n).normalize().multiplyScalar(ARC_R);
-      const sweep = -angle;
-      const pts = [];
-      for (let i = 0; i <= ARC_SEG; i++) {
-        pts.push(v0.clone().applyAxisAngle(n, (sweep * i) / ARC_SEG));
-      }
-      s.arcLine.geometry.setFromPoints(pts);
-      s.arcLine.geometry.attributes.position.needsUpdate = true;
-
-      const end = pts[ARC_SEG];
-      const tangent = new THREE.Vector3().crossVectors(n, end).normalize().multiplyScalar(Math.sign(sweep));
-      s.arcHead.position.copy(end);
-      s.arcHead.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
     }
-
-    s.prvLine.visible = showPrincipalAxis;
-    s.arcLine.visible = showPrincipalAxis && drawArc;
-    s.arcHead.visible = showPrincipalAxis && drawArc;
-  }, [quat, showPrincipalAxis]);
-
-  useEffect(() => {
-    const s = state.current;
-    if (!s.bodyAxes) return;
-    s.bodyAxes.forEach((g, i) => {
-      const on = highlight === null || highlight === i;
-      g.userData.mat.opacity = on ? 1 : 0.18;
-      g.userData.mat.transparent = true;
-      const sc = highlight === i ? 1.9 : 1;
-      g.userData.shaft.scale.set(sc, 1, sc);
-      g.userData.head.scale.set(sc, 1, sc);
-    });
-    if (s.inertial) s.inertial.visible = showInertial;
-  }, [highlight, showInertial]);
-
-  return <div ref={mountRef} style={{ width: "100%", height: "100%" }} />;
+    const s = p.get("seq");
+    if (s) {
+      const i = SEQUENCES.findIndex((x) => x.join("") === s);
+      if (i >= 0) out.seqIdx = i;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
-/* ============================================================================
-   UI PRIMITIVES
-   ========================================================================== */
-
-function Panel({ label, note, children, tone, action }) {
-  const T = useTheme();
-  return (
-    <section style={{
-      background: T.panel, border: `1px solid ${tone || T.rule}`,
-      borderRadius: 3, padding: "11px 13px 13px",
-    }}>
-      <header style={{
-        display: "flex", justifyContent: "space-between", alignItems: "baseline",
-        gap: 10, marginBottom: 9,
-      }}>
-        <h2 style={{
-          margin: 0, fontSize: 10.5, letterSpacing: "0.16em", textTransform: "uppercase",
-          color: T.dim, fontWeight: 600,
-        }}>{label}</h2>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          {note && <span style={{ fontSize: 10, color: tone || T.faint, fontFamily: "var(--mono)" }}>{note}</span>}
-          {action}
-        </div>
-      </header>
-      {children}
-    </section>
-  );
-}
-
-/** Per-panel spoiler switch. Small, quiet, and off by default. */
-function HideToggle({ on, onChange }) {
-  const T = useTheme();
-  return (
-    <label style={{
-      display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
-      fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: "0.12em",
-      textTransform: "uppercase", color: on ? T.live : T.faint,
-    }}>
-      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)}
-        style={{ accentColor: T.live, width: 11, height: 11 }} />
-      quiz me
-    </label>
-  );
-}
-
-function NumField({ value, onCommit, color, width = "100%", align = "right" }) {
-  const T = useTheme();
-  const [draft, setDraft] = useState(null);
-  const shown = draft !== null ? draft : value;
-  return (
-    <input
-      value={shown}
-      onChange={(e) => setDraft(e.target.value)}
-      onFocus={(e) => e.target.select()}
-      onBlur={() => { if (draft !== null) { onCommit(parseFloat(draft)); setDraft(null); } }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") { setDraft(null); e.currentTarget.blur(); }
-      }}
-      spellCheck={false}
-      style={{
-        // an uncommitted draft sits a shade back from a settled value
-        width, background: draft !== null ? T.panel : T.panelHi,
-        border: `1px solid ${draft !== null ? T.live : T.rule}`,
-        color: color || T.text, fontFamily: "var(--mono)", fontSize: 12.5,
-        padding: "5px 7px", borderRadius: 2, textAlign: align, outline: "none",
-        MozAppearance: "textfield",
-      }}
-    />
-  );
-}
-
-/* ============================================================================
-   MAIN
-   ========================================================================== */
+/* ============================================================================ */
 
 export default function AttitudeBench() {
-  const { name: themeName, T } = useThemeControls();
-
-  const [quat, setQuat] = useState(() =>
-    canonicalQuat(normalizeQuat([0.8446, 0.1913, 0.4619, 0.1913]))
-  );
-  const [seqIdx, setSeqIdx] = useState(5); // 3-2-1
+  const T = useTheme();
+  const [init] = useState(readURL);
+  const [quat, setQuatRaw] = useState(init.quat || START);
+  const [seqIdx, setSeqIdx] = useState(init.seqIdx ?? SEQ_321);
   const [highlight, setHighlight] = useState(null);
   const [showInertial, setShowInertial] = useState(true);
-  const [showPrincipalAxis, setShowPrincipalAxis] = useState(true);
-  const [scalarFirst, setScalarFirst] = useState(true);
-  const [bodyToInertial, setBodyToInertial] = useState(false);
-  const [showWork, setShowWork] = useState(false);
-  const [useShadow, setUseShadow] = useState(false);
-
-  // per-panel spoiler flags
-  const [hidden, setHidden] = useState({
-    euler: false, rodrigues: false, quat: false, dcm: false, axisAngle: false,
-  });
-  const toggleHidden = useCallback(
-    (k) => (on) => setHidden((h) => ({ ...h, [k]: on })), []
-  );
+  const [showSAR, setShowSAR] = useState(true);
+  const [hidden, setHidden] = useState({ dcm: false, euler: false, sar: false, quat: false });
+  const [flipSign, setFlipSign] = useState(false);
+  const [anim, setAnim] = useState(null);
+  const [touched, setTouched] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [isCoarse] = useState(coarse);
 
   const seq = SEQUENCES[seqIdx];
-  const C = useMemo(() => quatToDCM(quat), [quat]);
-  const Cdisp = bodyToInertial ? transpose(C) : C;
-  const pa = useMemo(() => quatToAxisAngle(quat), [quat]);
-  const eu = useMemo(() => dcmToEuler(C, seq), [C, seq]);
-  const crp = useMemo(() => quatToCRP(quat), [quat]);
-  const mrpBase = useMemo(() => quatToMRP(quat), [quat]);
-  const mrp = useShadow && mrpBase ? mrpShadow(mrpBase) : mrpBase;
 
-  // any change to the attitude re-hides every panel that is in quiz mode
-  const resetKey = useMemo(() => quat.join(","), [quat]);
+  /* ---------- animation ---------- */
 
-  const set = useCallback((q) => setQuat(canonicalQuat(normalizeQuat(q))), []);
+  const frame = useMemo(() => {
+    if (!anim) return null;
+    if (anim.kind === "euler") return eulerFrame(anim.seq, anim.angles, anim.t);
+    if (anim.kind === "sar") return sarFrame(anim.u, anim.theta, anim.t);
+    return { quat: slerp(anim.from, anim.to, anim.t) };
+  }, [anim]);
+
+  const shown = frame ? frame.quat : quat;
+  const shownRef = useRef(shown);
+  useEffect(() => { shownRef.current = shown; }, [shown]);
+
+  useEffect(() => {
+    if (!anim || !anim.playing) return;
+    let raf;
+    const t0 = performance.now() - anim.t * anim.msPerUnit;
+    const tick = (now) => {
+      const t = Math.min(anim.tMax, (now - t0) / anim.msPerUnit);
+      const end = t >= anim.tMax;
+      setAnim((a) => (a && a.id === anim.id ? (end && a.kind === "slerp" ? null : { ...a, t, playing: !end }) : a));
+      if (!end) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // restart only when a new animation starts or play/pause flips
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anim?.id, anim?.playing]);
+
+  const start = useCallback((a) => {
+    const instant = reduceMotion();
+    setAnim({ ...a, id: Math.random(), t: instant ? a.tMax : 0, playing: !instant });
+  }, []);
+
+  /** Set the attitude directly (typing, dragging). Stops any animation. */
+  const setQuat = useCallback((q) => {
+    setAnim(null);
+    setQuatRaw(canonicalQuat(normalizeQuat(q)));
+  }, []);
+
+  /** Glide to an attitude (Reset, Random). */
+  const glideTo = useCallback((to) => {
+    const from = shownRef.current;
+    const target = canonicalQuat(normalizeQuat(to));
+    setQuatRaw(target);
+    start({ kind: "slerp", from, to: target, tMax: 1, msPerUnit: 900 });
+  }, [start]);
 
   const onDrag = useCallback((dq) => {
-    setQuat((prev) => {
-      const m = new THREE.Quaternion(-prev[1], -prev[2], -prev[3], prev[0]);
-      const nm = dq.clone().multiply(m).normalize();
-      return canonicalQuat([nm.w, -nm.x, -nm.y, -nm.z]);
-    });
+    const p = shownRef.current;
+    const m = new THREE.Quaternion(p[1], p[2], p[3], p[0]);
+    const n = dq.clone().multiply(m).normalize();
+    setAnim(null);
+    setQuatRaw(canonicalQuat([n.w, n.x, n.y, n.z]));
   }, []);
 
   const randomize = () => {
+    // uniform over all attitudes (Gaussian 4-vector, normalised)
     const g = () => { let s = 0; for (let i = 0; i < 6; i++) s += Math.random(); return s - 3; };
-    set([g(), g(), g(), g()]);
+    glideTo([g(), g(), g(), g()]);
   };
 
-  const lockPct = Math.max(0, Math.min(1, eu.distanceToLock / (Math.PI / 2)));
-  const lockTone = eu.gimbalLock ? T.axis[0] : lockPct < 0.25 ? T.amber : null;
+  /* ---------- derived, all in course notation ---------- */
 
-  const qLabels = scalarFirst ? ["q₀", "q₁", "q₂", "q₃"] : ["q₁", "q₂", "q₃", "q₄"];
-  const qOrder = scalarFirst ? [0, 1, 2, 3] : [1, 2, 3, 0];
+  const Q = useMemo(() => quatToQ(shown), [shown]);
+  const ea = useMemo(() => QToEA(Q, seq), [Q, seq]);
+  const sar = useMemo(() => QToSAR(Q), [Q]);
+  const qc = useMemo(() => {
+    const c = toCourseQuat(shown);
+    return flipSign ? c.map((v) => -v) : c;
+  }, [shown, flipSign]);
+  const resetKey = useMemo(() => quat.join(","), [quat]);
 
-  const checkbox = { accentColor: T.live, width: 12, height: 12 };
+  /* keep the URL in step (not while something is moving) */
+  useEffect(() => {
+    if (anim && anim.playing) return;
+    const id = setTimeout(() => {
+      try {
+        const c = toCourseQuat(quat).map((v) => v.toFixed(6)).join(",");
+        const url = `${window.location.pathname}?q=${c}${seqIdx !== SEQ_321 ? `&seq=${seq.join("")}` : ""}`;
+        window.history.replaceState(null, "", url);
+      } catch { /* sandboxed frame: no URL, no problem */ }
+    }, 300);
+    return () => clearTimeout(id);
+  }, [quat, seqIdx, seq, anim]);
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch { /* clipboard blocked */ }
+  };
+
+  /* ---------- what the 3D view shows ---------- */
+
+  const playing = anim && anim.kind !== "slerp";
+  const eulerAnim = anim && anim.kind === "euler" ? anim : null;
+  const sarAnim = anim && anim.kind === "sar" ? anim : null;
+
+  const spin = useMemo(() => {
+    if (!frame || !frame.spin) return null;
+    if (sarAnim) return { ...frame.spin, color: T.rep.sar };
+    return { ...frame.spin, color: T.axis[frame.spin.axisIndex] };
+  }, [frame, sarAnim, T]);
+
+  const sarProp = useMemo(() => {
+    if (!showSAR || playing || !sar.u) return null;
+    return { axis: sar.u, angle: (sar.theta * Math.PI) / 180 };
+  }, [showSAR, playing, sar]);
+
+  const ghosts = frame && frame.ghosts ? frame.ghosts : [];
+
+  /* ---------- caption over the scene while a scene plays ---------- */
+
+  let caption = null;
+  if (eulerAnim && frame) {
+    const k = frame.step;
+    if (k < 3) {
+      const ax = eulerAnim.seq;
+      caption = (
+        <div className="caption" style={{ "--c": T.axis[ax[k] - 1] }}>
+          Step {k + 1} of 3: <span className="m">{GREEK[k]}</span> = {fmt(frame.part[k], 1)}° about <AxisName seq={ax} k={k} />
+        </div>
+      );
+    } else {
+      caption = <div className="caption" style={{ "--c": T.rep.euler }}>Done. Three turns, one attitude.</div>;
+    }
+  } else if (sarAnim && frame) {
+    caption = (
+      <div className="caption" style={{ "--c": T.rep.sar }}>
+        {anim.t < 1
+          ? <>One turn about <span className="m">û</span>: <span className="m">θ</span> = {fmt(frame.theta, 1)}°</>
+          : <>Same attitude, one turn of {fmt(sarAnim.theta, 1)}°</>}
+      </div>
+    );
+  }
+
+  const interact = useCallback(() => setTouched(true), []);
+
+  /* ============================== render ============================== */
 
   return (
-    <div style={{
-      "--mono": MONO, "--sans": SANS,
-      background: T.deep, color: T.text, fontFamily: "var(--sans)",
-      minHeight: "100%", padding: "18px 20px 26px",
-    }}>
-      <style>{`
-        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        input:focus { border-color: ${T.live} !important; }
-        button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid ${T.live}; outline-offset: 1px; }
-        .ab-grid { display: grid; gap: 12px; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); }
-        @media (max-width: 820px) { .ab-grid { grid-template-columns: 1fr; } }
-        @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
-      `}</style>
-
-      {/* ---- header ---- */}
-      <div style={{
-        display: "flex", flexWrap: "wrap", alignItems: "baseline",
-        justifyContent: "space-between", gap: 12, marginBottom: 14,
-      }}>
+    <div className="wrap pg">
+      <div className="pg-head">
         <div>
-          <h1 style={{
-            margin: 0, fontSize: 17, fontWeight: 600, letterSpacing: "-0.01em",
-          }}>Attitude Bench</h1>
-          <p style={{ margin: "3px 0 0", fontSize: 12, color: T.dim, maxWidth: 620 }}>
-            One orientation, six ways of writing it down. Drag the spacecraft, or type into any
-            panel — the rest follow.
+          <h1>Playground</h1>
+          <p className="lede" style={{ margin: "8px 0 0", maxWidth: 620 }}>
+            Grab the spacecraft and turn it. All four cards follow along, and you can type into any of them.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {[
-            ["Identity", () => set([1, 0, 0, 0])],
-            ["Random", randomize],
-            ["Gimbal lock", () => set(eulerToQuat([0.6, isProper(seq) ? 0 : Math.PI / 2, 0], seq))],
-            ["180° about y", () => set(axisAngleToQuat([0, 1, 0], Math.PI))],
-          ].map(([label, fn]) => (
-            <button key={label} onClick={fn} style={{
-              background: T.panel, border: `1px solid ${T.rule}`, color: T.text,
-              fontFamily: "var(--sans)", fontSize: 11.5, padding: "5px 10px",
-              borderRadius: 2, cursor: "pointer",
-            }}>{label}</button>
-          ))}
-        </div>
+        <button type="button" className="btn sm" onClick={copyLink}>
+          {copied ? "Link copied" : "Copy link to this attitude"}
+        </button>
       </div>
 
-      <div className="ab-grid">
-        {/* ================= LEFT: viewport ================= */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
-          <div style={{
-            position: "relative", background: SCENE_BG[themeName],
-            border: `1px solid ${T.rule}`, borderRadius: 3,
-            height: "clamp(320px, 46vh, 480px)", overflow: "hidden",
-          }}>
+      <div className="pg-grid">
+        {/* ------------------------------ stage ------------------------------ */}
+        <div className="pg-stage">
+          <div className="scene pg-view">
             <Viewport
-              quat={quat} onDrag={onDrag} highlight={highlight}
-              showInertial={showInertial} showPrincipalAxis={showPrincipalAxis}
+              quat={shown} onDrag={onDrag} highlight={highlight} showInertial={showInertial}
+              sar={sarProp} ghosts={ghosts} spin={spin} onInteract={interact}
             />
-            <div style={{
-              position: "absolute", left: 11, bottom: 10, display: "flex", gap: 13,
-              fontFamily: "var(--mono)", fontSize: 10.5, pointerEvents: "none",
-            }}>
-              {AXIS_NAME.map((n, i) => (
-                <span key={n} style={{ color: T.axis[i] }}>
-                  {n}<span style={{ color: T.faint }}>_body</span>
-                </span>
-              ))}
-              {showPrincipalAxis && <span style={{ color: T.amber }}>Euler axis · Φ</span>}
+            <div className="scene-ui" style={{ left: 12, top: 12 }}>
+              <button type="button" className="btn sm" onClick={() => glideTo(IDENTITY)}
+                title="Line the body frame back up with the inertial frame">
+                <Reset size={17} /> Reset
+              </button>
+              <button type="button" className="btn sm" onClick={randomize} title="Spin to a random attitude">
+                <Dice size={17} /> Random
+              </button>
             </div>
-            <div style={{
-              position: "absolute", right: 11, top: 10, fontFamily: "var(--mono)",
-              fontSize: 9.5, color: T.faint, pointerEvents: "none", textAlign: "right",
-              lineHeight: 1.5,
-            }}>
-              drag · rotate<br />middle-drag · orbit<br />wheel · zoom
-            </div>
-            <div style={{
-              position: "absolute", right: 11, bottom: 10, display: "flex", gap: 12,
-              alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end",
-            }}>
-              <label style={{
-                fontSize: 10.5, color: T.dim, display: "flex", gap: 5,
-                alignItems: "center", cursor: "pointer",
-              }}>
-                <input type="checkbox" checked={showPrincipalAxis}
-                  onChange={(e) => setShowPrincipalAxis(e.target.checked)}
-                  style={checkbox} />
-                principal axis
-              </label>
-              <label style={{
-                fontSize: 10.5, color: T.dim, display: "flex", gap: 5,
-                alignItems: "center", cursor: "pointer",
-              }}>
-                <input type="checkbox" checked={showInertial}
-                  onChange={(e) => setShowInertial(e.target.checked)}
-                  style={checkbox} />
-                inertial frame
-              </label>
+            {caption}
+            <div className="scene-hint" style={{ opacity: touched ? 0 : 1 }}>
+              {isCoarse ? "Drag to turn it. Two fingers to look around." : "Drag to turn it. Right-drag to look around."}
             </div>
           </div>
 
-          {/* ---- DCM: the signature panel ---- */}
-          <Panel
-            label="Direction cosine matrix"
-            note={bodyToInertial ? "Cᵀ · v_body = v_inertial" : "C · v_inertial = v_body"}
-            action={<HideToggle on={hidden.dcm} onChange={toggleHidden("dcm")} />}
-          >
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-              <Spoiler hidden={hidden.dcm} resetKey={resetKey}>
-                <div>
-                  {/* column headers — body axes only when we are showing Cᵀ */}
-                  <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
-                    <div style={{ width: 22 }} />
-                    {[0, 1, 2].map((c) => (
-                      <div key={c}
-                        onMouseEnter={() => bodyToInertial && setHighlight(c)}
-                        onMouseLeave={() => setHighlight(null)}
-                        style={{
-                          width: 76, textAlign: "center", fontFamily: "var(--mono)",
-                          fontSize: 9.5, letterSpacing: "0.06em",
-                          color: bodyToInertial ? T.axis[c] : T.faint,
-                          cursor: bodyToInertial ? "help" : "default",
-                        }}>
-                        {bodyToInertial ? `${AXIS_NAME[c]}_b` : `col ${c + 1}`}
-                      </div>
-                    ))}
-                  </div>
-
-                  {[0, 1, 2].map((r) => (
-                    <div key={r} style={{ display: "flex", gap: 3, marginBottom: 3, alignItems: "center" }}>
-                      {/* row label — body axes in the default inertial → body sense */}
-                      <div
-                        onMouseEnter={() => !bodyToInertial && setHighlight(r)}
-                        onMouseLeave={() => setHighlight(null)}
-                        style={{
-                          width: 22, textAlign: "right", paddingRight: 4, fontFamily: "var(--mono)",
-                          fontSize: 9.5, color: bodyToInertial ? T.faint : T.axis[r],
-                          cursor: bodyToInertial ? "default" : "help",
-                        }}>
-                        {bodyToInertial ? `row ${r + 1}` : `${AXIS_NAME[r]}_b`}
-                      </div>
-                      {[0, 1, 2].map((c) => (
-                        <div key={c}
-                          onMouseEnter={() => setHighlight(bodyToInertial ? c : r)}
-                          onMouseLeave={() => setHighlight(null)}
-                          style={{ width: 76, cursor: "help" }}>
-                          <NumField
-                            value={fmt(Cdisp[r][c])}
-                            color={bodyToInertial ? T.axis[c] : T.axis[r]}
-                            onCommit={(v) => {
-                              if (!isFinite(v)) return;
-                              const N = Cdisp.map((row) => row.slice());
-                              N[r][c] = v;
-                              const fixed = orthonormalize(N);
-                              set(dcmToQuat(bodyToInertial ? transpose(fixed) : fixed));
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </Spoiler>
-
-              <p style={{ margin: 0, fontSize: 11, color: T.dim, maxWidth: 210, lineHeight: 1.5 }}>
-                {bodyToInertial
-                  ? "This is Cᵀ, so the body axes have moved into the columns — each column is one body axis in inertial components. Hover a column to light it up."
-                  : "C maps inertial → body, so each row is one body axis written in inertial components — hover a row to see it light up in the viewport. That's the whole meaning of the matrix."}
-                <br />
-                <span style={{ color: T.faint }}>
-                  Typed values are re-orthonormalised, so a hand-entered matrix always lands on a real rotation.
-                </span>
-              </p>
-            </div>
-          </Panel>
+          <div className="legend" style={{ padding: "2px 4px" }}>
+            <span><i className="swatch-line" style={{ "--c": T.axis[0] }} /><i className="swatch-line" style={{ "--c": T.axis[1], marginLeft: -4 }} /><i className="swatch-line" style={{ "--c": T.axis[2], marginLeft: -4 }} /> body frame <span className="m">B</span></span>
+            <button type="button" className="toggle" aria-pressed={showInertial} style={{ "--c": T.inertial }}
+              onClick={() => setShowInertial((v) => !v)}>
+              <i className="swatch-line dashed" style={{ "--c": T.inertial }} /> inertial frame <span className="m">XYZ</span>
+            </button>
+            <button type="button" className="toggle" aria-pressed={showSAR} style={{ "--c": T.rep.sar }}
+              onClick={() => setShowSAR((v) => !v)}>
+              <span className="sw" /> SAR axis and <span className="m">θ</span>
+            </button>
+            <span className="faint tiny">Tap an axis in the corner to look down it.</span>
+          </div>
         </div>
 
-        {/* ================= RIGHT: representations ================= */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+        {/* ------------------------------ cards ------------------------------ */}
+        <div className="pg-cards">
 
-          {/* ---- quaternion ---- */}
-          <Panel
-            label="Quaternion"
-            note={scalarFirst ? "scalar first" : "scalar last"}
-            action={<HideToggle on={hidden.quat} onChange={toggleHidden("quat")} />}
-          >
-            <Spoiler hidden={hidden.quat} resetKey={resetKey}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
-                {qOrder.map((qi, slot) => (
-                  <div key={slot}>
-                    <div style={{
-                      fontFamily: "var(--mono)", fontSize: 10, color: qi === 0 ? T.amber : T.dim,
-                      marginBottom: 3,
-                    }}>{qLabels[slot]}</div>
-                    <NumField
-                      value={fmt(quat[qi], 5)}
-                      onCommit={(v) => {
-                        if (!isFinite(v)) return;
-                        const n = quat.slice(); n[qi] = v; set(n);
-                      }}
-                    />
+          {/* DCM */}
+          <RepCard rep="dcm" symbol="[Q]" title="Direction cosine matrix"
+            note={<>Maps inertial to body: <span className="m">v</span>|<sub>B</sub> = [Q] <span className="m">v</span>|<sub>I</sub></>}
+            hidden={hidden.dcm} onHide={(h) => setHidden((s) => ({ ...s, dcm: h }))}>
+            <Spoiler hidden={hidden.dcm} resetKey={resetKey}>
+              <div style={{ display: "grid", gridTemplateColumns: "34px repeat(3, minmax(0, 1fr))", gap: 8, alignItems: "center" }}>
+                <span />
+                {["X", "Y", "Z"].map((n) => (
+                  <div key={n} className="faint tiny" style={{ textAlign: "center", fontWeight: 600 }}>
+                    along <span className="m">{n}</span>
                   </div>
+                ))}
+                {[0, 1, 2].map((r) => (
+                  <RowCells key={r} r={r} Q={Q} T={T} setHighlight={setHighlight}
+                    onCommit={(c, v) => {
+                      const N = Q.map((row) => row.slice());
+                      N[r][c] = v;
+                      setQuat(dcmToQuat(orthonormalize(N)));
+                    }} />
                 ))}
               </div>
             </Spoiler>
-            <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
-              <label style={{ fontSize: 11, color: T.dim, display: "flex", gap: 5, cursor: "pointer" }}>
-                <input type="checkbox" checked={scalarFirst}
-                  onChange={(e) => setScalarFirst(e.target.checked)}
-                  style={checkbox} />
-                scalar first
-              </label>
-              <label style={{ fontSize: 11, color: T.dim, display: "flex", gap: 5, cursor: "pointer" }}>
-                <input type="checkbox" checked={bodyToInertial}
-                  onChange={(e) => setBodyToInertial(e.target.checked)}
-                  style={checkbox} />
-                body → inertial sense
-              </label>
-              <button onClick={() => setShowWork(!showWork)} style={{
-                background: "none", border: "none", color: T.live, fontSize: 11,
-                cursor: "pointer", padding: 0, fontFamily: "var(--sans)",
-              }}>{showWork ? "hide" : "show"} the substitution</button>
-            </div>
-            {showWork && (
-              <Spoiler hidden={hidden.quat} resetKey={resetKey}>
-                <pre style={{
-                  margin: "9px 0 0", padding: 9, background: T.panelHi,
-                  border: `1px solid ${T.rule}`, borderRadius: 2, fontFamily: "var(--mono)",
-                  fontSize: 10.5, color: T.dim, overflowX: "auto", lineHeight: 1.65,
-                }}>
-{`C₁₁ = q₀²+q₁²−q₂²−q₃²  = ${fmt(quat[0])}² + ${fmt(quat[1])}² − ${fmt(quat[2])}² − ${fmt(quat[3])}²
-                        = ${fmt(C[0][0])}
-C₁₂ = 2(q₁q₂ + q₀q₃)    = 2(${fmt(quat[1])}·${fmt(quat[2])} + ${fmt(quat[0])}·${fmt(quat[3])})
-                        = ${fmt(C[0][1])}
-C₁₃ = 2(q₁q₃ − q₀q₂)    = ${fmt(C[0][2])}
-‖q‖ = ${fmt(Math.hypot(...quat), 8)}   (unit norm is what makes C orthogonal)`}
-                </pre>
-              </Spoiler>
-            )}
-          </Panel>
+            <p className="note">
+              Each row is one body axis written in inertial coordinates. Hover a row to light that axis up.
+            </p>
+          </RepCard>
 
-          {/* ---- principal rotation (axis-angle) ---- */}
-          <Panel
-            label="Principal rotation"
-            note={pa.degenerate ? "axis undefined at Φ = 0" : "Euler's theorem"}
-            action={<HideToggle on={hidden.axisAngle} onChange={toggleHidden("axisAngle")} />}
-          >
-            <Spoiler hidden={hidden.axisAngle} resetKey={resetKey}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr) 1.15fr", gap: 6 }}>
+          {/* Euler angles */}
+          <RepCard rep="euler" symbol="α β γ" title="Euler angles"
+            note={<>Sequence {seqName(seq)}{SEQ_NICKNAME[seqName(seq)] ? ` (${SEQ_NICKNAME[seqName(seq)]})` : ""}</>}
+            hidden={hidden.euler} onHide={(h) => setHidden((s) => ({ ...s, euler: h }))}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
+              <label style={{ flex: "0 0 auto" }}>
+                <Label>Sequence</Label>
+                <select className="field" style={{ width: 190 }} value={seqIdx}
+                  onChange={(e) => { setAnim(null); setSeqIdx(+e.target.value); }}>
+                  {SEQUENCES.map((s, i) => (
+                    <option key={i} value={i}>
+                      {s.join("-")}{SEQ_NICKNAME[s.join("-")] ? ` · ${SEQ_NICKNAME[s.join("-")]}` : isProper(s) ? " · symmetric" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <Spoiler hidden={hidden.euler} resetKey={resetKey}>
+              <div className="grid3">
+                {[0, 1, 2].map((k) => {
+                  const val = [ea.alpha, ea.beta, ea.gamma][k];
+                  const col = T.axis[seq[k] - 1];
+                  return (
+                    <div key={k}>
+                      <Label color={col}>
+                        <span className="m">{GREEK[k]}</span> <span className="faint" style={{ fontWeight: 500 }}>about</span> <AxisName seq={seq} k={k} />
+                      </Label>
+                      <NumField value={fmt(val, 2)} color={col} suffix="°" label={`${GREEK[k]} in degrees`}
+                        onCommit={(v) => {
+                          const a = [ea.alpha, ea.beta, ea.gamma];
+                          a[k] = v;
+                          setQuat(dcmToQuat(EAToQ(a[0], a[1], a[2], seq)));
+                        }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </Spoiler>
+
+            <div className="player">
+              {!eulerAnim ? (
+                <div className="player-row" style={{ flexWrap: "wrap" }}>
+                  <button type="button" className="btn sm primary" onClick={() =>
+                    start({ kind: "euler", seq, angles: [ea.alpha, ea.beta, ea.gamma], tMax: 3, msPerUnit: 1800 })}>
+                    <Play size={15} /> Watch the {seqName(seq)} sequence
+                  </button>
+                  <span className="dim small">Builds this attitude one rotation at a time.</span>
+                </div>
+              ) : (
+                <EulerPlayer anim={eulerAnim} frame={frame} T={T}
+                  onToggle={() => setAnim((a) => (a.t >= a.tMax ? { ...a, t: 0, playing: true, id: Math.random() } : { ...a, playing: !a.playing }))}
+                  onScrub={(t) => setAnim((a) => ({ ...a, t, playing: false }))}
+                  onClose={() => setAnim(null)} />
+              )}
+            </div>
+          </RepCard>
+
+          {/* SAR */}
+          <RepCard rep="sar" symbol="û, θ" title="Single-axis rotation"
+            note="One turn of θ about the Euler axis û"
+            hidden={hidden.sar} onHide={(h) => setHidden((s) => ({ ...s, sar: h }))}>
+            <Spoiler hidden={hidden.sar} resetKey={resetKey}>
+              <div className="grid4">
                 {[0, 1, 2].map((i) => (
                   <div key={i}>
-                    <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: T.axis[i], marginBottom: 3 }}>
-                      e{"₁₂₃"[i]}
-                    </div>
-                    <NumField value={fmt(pa.axis[i], 5)} color={T.axis[i]}
+                    <Label color={T.axis[i]}><span className="m">u</span><sub>{"xyz"[i]}</sub></Label>
+                    <NumField value={sar.u ? fmt(sar.u[i], 4) : "—"} color={T.axis[i]} label={`u ${"xyz"[i]}`}
                       onCommit={(v) => {
-                        if (!isFinite(v)) return;
-                        const a = pa.axis.slice(); a[i] = v;
-                        set(axisAngleToQuat(a, pa.angle));
+                        const u = sar.u ? sar.u.slice() : [1, 0, 0];
+                        u[i] = v;
+                        if (Math.hypot(...u) < 1e-9) return;
+                        setQuat(fromCourseQuat(SARToQuat(u, sar.theta)));
                       }} />
                   </div>
                 ))}
                 <div>
-                  <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: T.amber, marginBottom: 3 }}>Φ °</div>
-                  <NumField value={fmt(pa.angle * DEG, 3)} color={T.amber}
-                    onCommit={(v) => isFinite(v) && set(axisAngleToQuat(pa.axis, v * RAD))} />
+                  <Label color={T.rep.sar}><span className="m">θ</span></Label>
+                  <NumField value={fmt(sar.theta, 2)} color={T.rep.sar} suffix="°" label="theta in degrees"
+                    onCommit={(v) => setQuat(fromCourseQuat(SARToQuat(sar.u || [0, 0, 1], v)))} />
                 </div>
               </div>
             </Spoiler>
-            <p style={{ margin: "8px 0 0", fontSize: 11, color: T.faint, lineHeight: 1.5 }}>
-              However tangled the orientation looks, it is one turn of Φ about the amber line in the
-              viewport — the amber arc is that turn, swept out.
-            </p>
-          </Panel>
+            {!sar.u && <p className="note">No rotation yet, so there's no axis to show. Turn the spacecraft a little.</p>}
+            <div className="player">
+              {!sarAnim ? (
+                <div className="player-row" style={{ flexWrap: "wrap" }}>
+                  <button type="button" className="btn sm primary" disabled={!sar.u}
+                    onClick={() => start({ kind: "sar", u: sar.u, theta: sar.theta, tMax: 1, msPerUnit: 2600 })}>
+                    <Play size={15} /> Do it in one turn
+                  </button>
+                  <span className="dim small">Same attitude as the three Euler rotations.</span>
+                </div>
+              ) : (
+                <div className="player-row">
+                  <button type="button" className="icon-btn" aria-label={anim.playing ? "Pause" : "Play"}
+                    onClick={() => setAnim((a) => (a.t >= a.tMax ? { ...a, t: 0, playing: true, id: Math.random() } : { ...a, playing: !a.playing }))}>
+                    {anim.playing ? <Pause size={16} /> : <Play size={16} />}
+                  </button>
+                  <input type="range" className="slider" style={{ "--c": T.rep.sar }} min={0} max={1} step={0.001}
+                    value={anim.t} aria-label="Scrub the turn"
+                    onChange={(e) => setAnim((a) => ({ ...a, t: +e.target.value, playing: false }))} />
+                  <button type="button" className="btn sm" onClick={() => setAnim(null)}>Done</button>
+                </div>
+              )}
+            </div>
+          </RepCard>
 
-          {/* ---- Euler angles ---- */}
-          <Panel
-            label="Euler angles"
-            note={hidden.euler
-              ? "hidden"
-              : eu.gimbalLock ? "GIMBAL LOCK" : `${(eu.distanceToLock * DEG).toFixed(1)}° from singularity`}
-            tone={lockTone}
-            action={<HideToggle on={hidden.euler} onChange={toggleHidden("euler")} />}
-          >
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-end", marginBottom: 8, flexWrap: "wrap" }}>
-              <div style={{ flex: "0 0 auto" }}>
-                <div style={{ fontSize: 10, color: T.dim, marginBottom: 3, letterSpacing: "0.1em" }}>SEQUENCE</div>
-                <select value={seqIdx} onChange={(e) => setSeqIdx(+e.target.value)} style={{
-                  background: T.panelHi, border: `1px solid ${T.rule}`, color: T.text,
-                  fontFamily: "var(--mono)", fontSize: 12.5, padding: "5px 7px",
-                  borderRadius: 2, outline: "none",
-                }}>
-                  {SEQUENCES.map((s, i) => (
-                    <option key={i} value={i}>
-                      {s.join("-")} {isProper(s) ? "· proper" : "· Tait-Bryan"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ flex: "1 1 200px", minWidth: 190 }}>
-                <Spoiler hidden={hidden.euler} resetKey={resetKey}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
-                    {[0, 1, 2].map((n) => (
-                      <div key={n} style={{ flex: "1 1 62px", minWidth: 0 }}>
-                        <div style={{
-                          fontFamily: "var(--mono)", fontSize: 10, marginBottom: 3,
-                          color: n === 1 ? (lockTone || T.dim) : T.axis[seq[n] - 1],
-                        }}>
-                          {["θ₁", "θ₂", "θ₃"][n]} <span style={{ color: T.faint }}>/{seq[n]}</span>
-                        </div>
-                        <NumField
-                          value={fmt(eu.angles[n] * DEG, 3)}
-                          color={n === 1 ? (lockTone || T.text) : T.axis[seq[n] - 1]}
-                          onCommit={(v) => {
-                            if (!isFinite(v)) return;
-                            const a = eu.angles.slice(); a[n] = v * RAD;
-                            set(eulerToQuat(a, seq));
-                          }} />
+          {/* Quaternion */}
+          <RepCard rep="quat" symbol="q" title="Quaternion"
+            note={<>Scalar last: <span className="m">q</span> = [ <span className="m">û</span> sin(<span className="m">θ</span>/2) ; cos(<span className="m">θ</span>/2) ]</>}
+            hidden={hidden.quat} onHide={(h) => setHidden((s) => ({ ...s, quat: h }))}>
+            <Spoiler hidden={hidden.quat} resetKey={resetKey}>
+              <div className="grid4">
+                {[0, 1, 2, 3].map((i) => {
+                  const col = i < 3 ? T.axis[i] : T.rep.quat;
+                  const v = qc[i];
+                  return (
+                    <div key={i} style={{ "--c": col }}>
+                      <Label color={col}><span className="m">q</span><sub>{i + 1}</sub>{i === 3 && <span className="faint" style={{ fontWeight: 500 }}> scalar</span>}</Label>
+                      <NumField value={fmt(v, 4)} color={col} label={`q${i + 1}`}
+                        onCommit={(nv) => {
+                          const c = qc.slice();
+                          c[i] = nv;
+                          setQuat(fromCourseQuat(c));
+                        }} />
+                      <div className="qbar" aria-hidden="true">
+                        <i style={{ left: `${50 + Math.min(0, v) * 50}%`, width: `${Math.abs(v) * 50}%` }} />
                       </div>
-                    ))}
-                  </div>
-                </Spoiler>
-              </div>
-            </div>
-
-            {/* singularity meter */}
-            <div>
-              <div style={{
-                height: 3, background: T.panelHi, borderRadius: 2, overflow: "hidden",
-              }}>
-                <div style={{
-                  height: "100%", width: `${lockPct * 100}%`,
-                  background: lockTone || T.live, transition: "width .12s linear",
-                }} />
-              </div>
-              <p style={{ margin: "6px 0 0", fontSize: 11, color: lockTone || T.faint, lineHeight: 1.5 }}>
-                {eu.gimbalLock
-                  ? `θ₂ is at its singular value: axes ${seq[0]} and ${seq[2]} now do the same job, so only θ₁ + θ₃ is recoverable. This panel puts the whole sum in θ₁ — the DCM and quaternion are unbothered.`
-                  : `Bar shows how much room θ₂ has left before ${isProper(seq) ? "0° or 180°" : "±90°"} collapses two of the three axes together.`}
-              </p>
-            </div>
-          </Panel>
-
-          {/* ---- Rodrigues family ---- */}
-          <Panel
-            label="Rodrigues parameters"
-            note="minimal, 3 numbers"
-            action={<HideToggle on={hidden.rodrigues} onChange={toggleHidden("rodrigues")} />}
-          >
-            <Spoiler hidden={hidden.rodrigues} resetKey={resetKey}>
-              <div style={{ display: "grid", gridTemplateColumns: "58px repeat(3, 1fr)", gap: 6, alignItems: "center" }}>
-                <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: T.dim }}>CRP q</span>
-                {crp
-                  ? crp.map((v, i) => (
-                      <NumField key={i} value={fmt(v, 4)} color={T.axis[i]}
-                        onCommit={(nv) => { if (!isFinite(nv)) return; const p = crp.slice(); p[i] = nv; set(crpToQuat(p)); }} />
-                    ))
-                  : <div style={{
-                      gridColumn: "2 / 5", fontFamily: "var(--mono)", fontSize: 11.5,
-                      color: T.axis[0], padding: "5px 0",
-                    }}>→ ±∞  singular at Φ = 180°</div>}
-
-                <span style={{ fontFamily: "var(--mono)", fontSize: 10.5, color: T.dim }}>MRP σ</span>
-                {mrp
-                  ? mrp.map((v, i) => (
-                      <NumField key={i} value={fmt(v, 4)} color={T.axis[i]}
-                        onCommit={(nv) => { if (!isFinite(nv)) return; const s = mrp.slice(); s[i] = nv; set(mrpToQuat(s)); }} />
-                    ))
-                  : <div style={{
-                      gridColumn: "2 / 5", fontFamily: "var(--mono)", fontSize: 11.5,
-                      color: T.axis[0], padding: "5px 0",
-                    }}>→ ±∞  singular at Φ = 360°</div>}
+                    </div>
+                  );
+                })}
               </div>
             </Spoiler>
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-              gap: 10, marginTop: 8, flexWrap: "wrap",
-            }}>
-              <p style={{ margin: 0, fontSize: 11, color: T.faint, lineHeight: 1.5, flex: "1 1 190px" }}>
-                Three numbers cannot cover every orientation without blowing up somewhere. The MRP
-                shadow set is the standard dodge: same rotation, reciprocal magnitude.
-              </p>
-              <button onClick={() => setUseShadow(!useShadow)} disabled={!mrpBase} style={{
-                background: useShadow ? T.panelHi : "none",
-                border: `1px solid ${useShadow ? T.live : T.rule}`,
-                color: mrpBase ? (useShadow ? T.live : T.dim) : T.faint,
-                fontSize: 11, padding: "4px 9px", borderRadius: 2,
-                cursor: mrpBase ? "pointer" : "not-allowed", fontFamily: "var(--sans)",
-              }}>
-                {useShadow ? "shadow set" : "principal set"}
-                {/* the magnitude is an answer too, so it goes quiet in quiz mode */}
-                {mrp && !hidden.rodrigues && ` · |σ| = ${fmt(Math.hypot(...mrp), 3)}`}
+            <div className="player-row" style={{ marginTop: 14, flexWrap: "wrap" }}>
+              <button type="button" className="btn sm" onClick={() => setFlipSign((f) => !f)} aria-pressed={flipSign}>
+                <Flip size={16} /> {flipSign ? "Back to +q" : "Flip to −q"}
               </button>
+              <span className="dim small">
+                {flipSign ? "Every sign flipped and the spacecraft didn't move. q and −q are the same attitude." : "Try it and watch the spacecraft."}
+              </span>
             </div>
-          </Panel>
+          </RepCard>
         </div>
       </div>
+    </div>
+  );
+}
 
-      <p style={{
-        margin: "16px 0 0", fontSize: 10.5, color: T.faint, fontFamily: "var(--mono)",
-        lineHeight: 1.6,
-      }}>
-        Internal convention: C maps inertial → body · q scalar-first, same sense · Euler sequences
-        intrinsic · conversions verified by 13,316 round-trip assertions.
+/* ---------- pieces ---------- */
+
+function RowCells({ r, Q, T, setHighlight, onCommit }) {
+  const col = T.axis[r];
+  return (
+    <>
+      <div className="rowlab" style={{ color: col }}
+        onMouseEnter={() => setHighlight(r)} onMouseLeave={() => setHighlight(null)}
+        title={`Row ${r + 1}: the body ${"xyz"[r]} axis`}>
+        {"xyz"[r]}<sub>B</sub>
+      </div>
+      {[0, 1, 2].map((c) => (
+        <div key={c} onMouseEnter={() => setHighlight(r)} onMouseLeave={() => setHighlight(null)}>
+          <NumField value={fmt(Q[r][c], 4)} color={col} label={`Q${r + 1}${c + 1}`} onCommit={(v) => onCommit(c, v)} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function EulerPlayer({ anim, frame, T, onToggle, onScrub, onClose }) {
+  const k = frame.step;
+  return (
+    <div>
+      <div className="steps" style={{ marginBottom: 10 }}>
+        {[0, 1, 2].map((j) => (
+          <button key={j} type="button" className={`step${k === j ? " on" : ""}${k > j ? " done" : ""}`}
+            style={{ "--c": T.axis[anim.seq[j] - 1] }} onClick={() => onScrub(j + 1)}>
+            <b>{GREEK[j]}</b> about <AxisName seq={anim.seq} k={j} />
+          </button>
+        ))}
+      </div>
+      <div className="player-row">
+        <button type="button" className="icon-btn" aria-label={anim.playing ? "Pause" : "Play"} onClick={onToggle}>
+          {anim.playing ? <Pause size={16} /> : <Play size={16} />}
+        </button>
+        <input type="range" className="slider" style={{ "--c": T.rep.euler }} min={0} max={3} step={0.001}
+          value={anim.t} onChange={(e) => onScrub(+e.target.value)} aria-label="Scrub the sequence" />
+        <button type="button" className="btn sm" onClick={onClose}>Done</button>
+      </div>
+      <p className="note">
+        Each turn happens about an axis of the frame you just made. The dashed triad is the frame from the step before.
       </p>
     </div>
   );
