@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import Viewport from "../../components/Viewport.jsx";
@@ -67,9 +67,52 @@ export const Eq = ({ children }) => <div className="eq">{children}</div>;
 export function TeX({ children, block, tint }) {
   const src = Array.isArray(children) ? children.join("") : String(children);
   const html = useMemo(
-    () => katex.renderToString(src, { displayMode: !!block, throwOnError: false, strict: false, trust: false }),
+    () => katex.renderToString(src, { displayMode: !!block, throwOnError: false, strict: false, trust: (c) => c.command === "\\htmlClass" }),
     [src, block],
   );
   if (block) return <div className={`eq tex${tint ? "" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />;
   return <span className="tex-i" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+/**
+ * A derivation as a flowchart. Each step is a box; the arrow into it carries
+ * the rule that was applied. Hover or tap a rule and the terms it talks about
+ * light up in the boxes above and below (mark them in TeX with \\htmlClass{m-a}{…}).
+ * steps: [{ tex, rule?, marks?: ["a", "b"] }]
+ */
+export function MathFlow({ steps, tone = "primary", reveal = true }) {
+  const [k, setK] = useState(reveal ? 1 : steps.length);
+  const [hl, setHl] = useState(null);
+  const shown = steps.slice(0, k);
+  return (
+    <div className={`mflow${hl ? hl.map((m) => ` hl-${m}`).join("") : ""}`} style={{ "--c": `var(--${tone})` }}>
+      {shown.map((st, i) => (
+        <div key={i} className="rise">
+          {i > 0 && (
+            <div className="mflow-link">
+              <span className="mflow-arrow" aria-hidden="true" />
+              {st.rule && (
+                <button type="button" className={`mflow-rule${hl === st.marks ? " on" : ""}`}
+                  onMouseEnter={() => setHl(st.marks || null)} onMouseLeave={() => setHl(null)}
+                  onFocus={() => setHl(st.marks || null)} onBlur={() => setHl(null)}
+                  onClick={() => setHl((h) => (h === st.marks ? null : st.marks || null))}>
+                  {st.rule}
+                </button>
+              )}
+            </div>
+          )}
+          <div className="mflow-node"><TeX block>{st.tex}</TeX></div>
+        </div>
+      ))}
+      {reveal && (
+        <div className="mstep-ctl">
+          <button type="button" className="btn sm" disabled={k <= 1} onClick={() => setK(k - 1)}>Back</button>
+          <button type="button" className="btn sm primary" disabled={k >= steps.length} onClick={() => setK(k + 1)}>
+            Next step ({k}/{steps.length})
+          </button>
+          <button type="button" className="btn sm" disabled={k >= steps.length} onClick={() => setK(steps.length)}>Show all</button>
+        </div>
+      )}
+    </div>
+  );
 }

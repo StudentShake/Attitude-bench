@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import Viewport from "./Viewport.jsx";
 import { Play, Pause, Reset } from "./Icons.jsx";
-import { useTheme } from "../lib/theme.js";
+import { useTheme, stepColor } from "../lib/theme.js";
 import { SEQUENCES, isProper } from "../lib/attitude.js";
 import { seqName, SEQ_NICKNAME, quatToSAR, toCourseQuat } from "../lib/course.js";
 import { eulerFrame, sarFrame } from "../lib/director.js";
@@ -107,7 +107,7 @@ export default function SequencePlayer({
   const spin = frame.spin
     ? {
       ...frame.spin,
-      color: mode === "sar" ? T.rep.sar : T.axis[frame.spin.axisIndex],
+      color: mode === "sar" ? T.rep.sar : stepColor(T, seq, frame.spin.label.sub ? +frame.spin.label.sub : 0),
       label: mode === "sar" ? { letter: "û", sub: "" } : frame.spin.label,
     }
     : null;
@@ -123,7 +123,7 @@ export default function SequencePlayer({
       ? <>One turn: <span className="m">θ</span> = {sar ? sar.theta.toFixed(1) : 0}° about <span className="m">û</span></>
       : <>Same attitude in one turn of {sarInfo.theta.toFixed(1)}°</>;
   }
-  const capColor = mode === "sar" ? T.rep.sar : k < 3 && t > 0 ? T.axis[seq[k] - 1] : T.rep.euler;
+  const capColor = mode === "sar" ? T.rep.sar : k < 3 && t > 0 ? stepColor(T, seq, k) : T.rep.euler;
 
   return (
     <div>
@@ -147,7 +147,7 @@ export default function SequencePlayer({
             {[0, 1, 2].map((j) => (
               <button key={j} type="button"
                 className={`step${t > 0 && k === j ? " on" : ""}${t > 0 && k > j ? " done" : ""}`}
-                style={{ "--c": T.axis[seq[j] - 1] }} onClick={() => playStep(j)}
+                style={{ "--c": stepColor(T, seq, j) }} onClick={() => playStep(j)}
                 title={`Play just the ${GREEK[j]} turn`}>
                 <b>{GREEK[j]}</b> about <AxisName seq={seq} k={j} />
               </button>

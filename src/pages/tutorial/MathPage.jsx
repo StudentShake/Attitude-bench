@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
-import { Fig, M, TeX } from "./kit.jsx";
+import { Fig, M, TeX, MathFlow } from "./kit.jsx";
+import { ortho, arc3, path, fromAzEl, cross, scale, add } from "./ortho.js";
 
 /* ============================================================================
    THE MATH, STEP BY STEP
@@ -9,60 +10,32 @@ import { Fig, M, TeX } from "./kit.jsx";
    algebra instead of reading a wall of it.
    ========================================================================== */
 
-/** Reveal children one at a time. */
-function Steps({ children, tone = "primary" }) {
-  const items = Array.isArray(children) ? children.filter(Boolean) : [children];
-  const [k, setK] = useState(1);
-  return (
-    <div className="mstep" style={{ "--c": `var(--${tone})` }}>
-      <ol>
-        {items.slice(0, k).map((c, i) => <li key={i} className="rise">{c}</li>)}
-      </ol>
-      <div className="mstep-ctl">
-        <button type="button" className="btn sm" disabled={k <= 1} onClick={() => setK(k - 1)}>Back</button>
-        <button type="button" className="btn sm primary" disabled={k >= items.length} onClick={() => setK(k + 1)}>
-          Next step ({k}/{items.length})
-        </button>
-        <button type="button" className="btn sm" disabled={k >= items.length} onClick={() => setK(items.length)}>Show all</button>
-      </div>
-    </div>
-  );
-}
-
 /* ---------- 1. nine numbers, three free: build a [Q] ---------- */
-
-const D = Math.PI / 180;
-const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
 function Builder() {
   const T = useTheme();
-  const [az, setAz] = useState(35);
-  const [el, setEl] = useState(20);
+  const [az, setAz] = useState(-35);
+  const [el, setEl] = useState(28);
   const [psi, setPsi] = useState(60);
   const [stage, setStage] = useState(1);
-  const r1 = [Math.cos(el * D) * Math.cos(az * D), Math.cos(el * D) * Math.sin(az * D), Math.sin(el * D)];
-  // two directions perpendicular to r1; row 2 is any mix of them (one free angle)
-  const e1 = [-Math.sin(az * D), Math.cos(az * D), 0];
+  const r1 = fromAzEl(az, el);
+  const h = [Math.cos((az * Math.PI) / 180), Math.sin((az * Math.PI) / 180), 0];
+  const e1 = [-Math.sin((az * Math.PI) / 180), Math.cos((az * Math.PI) / 180), 0];
   const e2 = cross(r1, e1);
-  const r2 = [0, 1, 2].map((i) => Math.cos(psi * D) * e1[i] + Math.sin(psi * D) * e2[i]);
+  const r2 = add(scale(e1, Math.cos((psi * Math.PI) / 180)), scale(e2, Math.sin((psi * Math.PI) / 180)));
   const r3 = cross(r1, r2);
   const rows = [r1, r2, r3];
-
-  // orthographic view from the side, so row 1 starts out square-on
-  const cA = 115 * D, cE = 16 * D;
-  const rgt = [-Math.sin(cA), Math.cos(cA), 0];
-  const upv = [-Math.sin(cE) * Math.cos(cA), -Math.sin(cE) * Math.sin(cA), Math.cos(cE)];
-  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-  const P = (v, s = 120) => [190 + dot(v, rgt) * s, 165 - dot(v, upv) * s];
-  const O = P([0, 0, 0]);
-  const circle = Array.from({ length: 73 }, (_, i) => {
-    const t = (i / 72) * 2 * Math.PI;
-    return P([0, 1, 2].map((k) => Math.cos(t) * e1[k] + Math.sin(t) * e2[k]));
-  });
-  const circ = circle.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const V = ortho(25, 20, 120, 190, 172);
+  const O = V.O;
+  const equ = arc3([0, 0, 0], [1, 0, 0], [0, 1, 0], 1, 0, 2 * Math.PI, 90).map(V.P);
+  const mer = arc3([0, 0, 0], h, [0, 0, 1], 1, -Math.PI / 2, Math.PI / 2, 60).map(V.P);
+  const azArc = arc3([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.4, 0, (az * Math.PI) / 180, 40).map(V.P);
+  const elArc = arc3([0, 0, 0], h, [0, 0, 1], 0.6, 0, (el * Math.PI) / 180, 30).map(V.P);
+  const foot = V.P(scale(h, Math.cos((el * Math.PI) / 180)));
+  const circ = arc3([0, 0, 0], e1, e2, 1, 0, 2 * Math.PI, 90).map(V.P);
   const arrow = (v, col, show = true) => {
     if (!show) return null;
-    const t = P(v);
+    const t = V.P(v);
     return (
       <g>
         <line x1={O[0]} y1={O[1]} x2={t[0]} y2={t[1]} stroke={col} strokeWidth="5" strokeLinecap="round" />
@@ -72,12 +45,14 @@ function Builder() {
   };
   const state = (r) => (r + 1 < stage ? "set" : r + 1 === stage ? "now" : "later");
   const why = [
-    "Row 1: any direction. Picking a point on a sphere takes 2 numbers (the third is fixed by length 1).",
-    "Row 2: must be perpendicular to row 1, so it lives on the dashed circle. 1 number: where on the circle.",
-    "Row 3: nothing left to pick. It has to be row 1 × row 2.",
+    "Row 1 can point anywhere. Like a place on a globe, that takes 2 numbers: longitude (azimuth) and latitude (elevation). Its length is already fixed at 1.",
+    "Row 2 has to be at right angles to row 1, so its tip must sit on the dashed circle. Only 1 number left: where on the circle.",
+    "Row 3 has nothing left to choose. It's row 1 × row 2.",
   ];
+  const azLab = V.P(fromAzEl(az / 2, 0).map((v) => v * 0.62));
+  const elLab = V.P(add(scale(h, 0.6 * Math.cos((el * Math.PI) / 360)), [0, 0, 0.6 * Math.sin((el * Math.PI) / 360)]));
   return (
-    <Fig caption="Build a DCM by hand. Row 1 costs two free numbers, row 2 costs one, row 3 costs none. That's the 2 + 1 + 0 = 3.">
+    <Fig caption="Build a DCM by hand. Row 1 costs two free numbers, row 2 costs one, row 3 costs none. That's 2 + 1 + 0 = 3.">
       <div className="panel">
         <div className="seg" role="group" aria-label="Step" style={{ marginBottom: 10 }}>
           {[1, 2, 3].map((n) => (
@@ -85,18 +60,30 @@ function Builder() {
           ))}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center" }}>
-          <svg viewBox="0 0 380 330" style={{ flex: "1 1 260px", maxWidth: 400 }} role="img" aria-label="A sphere with the three rows of Q drawn as arrows">
-            <circle cx={O[0]} cy={O[1]} r="120" fill="none" stroke={T.line} strokeWidth="1.5" />
+          <svg viewBox="0 0 380 340" style={{ flex: "1 1 330px", maxWidth: 440 }} role="img" aria-label="A globe with the three rows of Q drawn as arrows">
+            <circle cx={O[0]} cy={O[1]} r={V.s} fill="none" stroke={T.line} strokeWidth="1.5" />
+            <path d={path(equ)} fill="none" stroke={T.faint} strokeWidth="1.2" strokeDasharray="4 5" />
+            {stage === 1 && <path d={path(mer)} fill="none" stroke={T.faint} strokeWidth="1.2" strokeDasharray="4 5" />}
             {[[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((e, i) => {
-              const p = P(e, 140);
+              const p = V.P(scale(e, 1.15));
               return (
                 <g key={i}>
-                  <line x1={O[0]} y1={O[1]} x2={p[0]} y2={p[1]} stroke={T.faint} strokeWidth="1.5" strokeDasharray="4 4" />
+                  <line x1={O[0]} y1={O[1]} x2={p[0]} y2={p[1]} stroke={T.faint} strokeWidth="1.3" strokeDasharray="3 4" />
                   <text x={p[0] + 4} y={p[1] + 4} fill={T.faint} fontSize="15" style={{ fontFamily: "Times New Roman", fontStyle: "italic", fontWeight: 700 }}>{"XYZ"[i]}</text>
                 </g>
               );
             })}
-            {stage >= 2 && <path d={circ} fill="none" stroke={T.axis[1]} strokeWidth="2.5" strokeDasharray="6 5" opacity=".8" />}
+            {stage === 1 && (
+              <g>
+                <path d={path(azArc)} fill="none" stroke={T.primary} strokeWidth="3" />
+                <path d={path(elArc)} fill="none" stroke={T.rep.quat} strokeWidth="3" />
+                <line x1={O[0]} y1={O[1]} x2={foot[0]} y2={foot[1]} stroke={T.faint} strokeWidth="1.5" />
+                <line x1={V.P(r1)[0]} y1={V.P(r1)[1]} x2={foot[0]} y2={foot[1]} stroke={T.faint} strokeWidth="1.5" strokeDasharray="3 4" />
+                <text x={azLab[0]} y={azLab[1] + 16} textAnchor="middle" fill={T.primary} fontSize="12.5" style={{ fontFamily: "var(--sans)", fontWeight: 800 }}>azimuth</text>
+                <text x={elLab[0] - 10} y={elLab[1] - 4} textAnchor="end" fill={T.rep.quat} fontSize="12.5" style={{ fontFamily: "var(--sans)", fontWeight: 800 }}>elevation</text>
+              </g>
+            )}
+            {stage >= 2 && <path d={path(circ)} fill="none" stroke={T.axis[1]} strokeWidth="2.5" strokeDasharray="6 5" opacity=".85" />}
             {arrow(r1, T.axis[0])}
             {arrow(r2, T.axis[1], stage >= 2)}
             {arrow(r3, T.axis[2], stage >= 3)}
@@ -113,17 +100,17 @@ function Builder() {
             <p className="small" style={{ marginTop: 12 }}>{why[stage - 1]}</p>
             {stage === 1 && (
               <>
-                <label className="blk"><span className="lbl">free number 1: azimuth {az}°</span>
-                  <input type="range" className="slider" min={-180} max={180} value={az} onChange={(e) => setAz(+e.target.value)} style={{ "--c": T.axis[0] }} /></label>
-                <label className="blk"><span className="lbl">free number 2: elevation {el}°</span>
-                  <input type="range" className="slider" min={-85} max={85} value={el} onChange={(e) => setEl(+e.target.value)} style={{ "--c": T.axis[0] }} /></label>
+                <label className="blk"><span className="lbl" style={{ color: T.primary }}>free number 1: azimuth (longitude) {az}°</span>
+                  <input type="range" className="slider" min={-180} max={180} value={az} onChange={(e) => setAz(+e.target.value)} style={{ "--c": T.primary }} /></label>
+                <label className="blk"><span className="lbl" style={{ color: T.rep.quat }}>free number 2: elevation (latitude) {el}°</span>
+                  <input type="range" className="slider" min={-85} max={85} value={el} onChange={(e) => setEl(+e.target.value)} style={{ "--c": T.rep.quat }} /></label>
               </>
             )}
             {stage === 2 && (
-              <label className="blk"><span className="lbl">free number 3: angle around the circle {psi}°</span>
+              <label className="blk"><span className="lbl" style={{ color: T.axis[1] }}>free number 3: angle around the circle {psi}°</span>
                 <input type="range" className="slider" min={-180} max={180} value={psi} onChange={(e) => setPsi(+e.target.value)} style={{ "--c": T.axis[1] }} /></label>
             )}
-            {stage === 3 && <p className="small dim">No slider. Try going back and moving row 1 or row 2: row 3 follows.</p>}
+            {stage === 3 && <p className="small dim">No slider. Go back and move row 1 or row 2: row 3 follows.</p>}
           </div>
         </div>
       </div>
@@ -210,9 +197,104 @@ function Multiply() {
 
 /* ============================================================================ */
 
+const hc = (m, x) => `\\htmlClass{m-${m}}{${x}}`;
+
+const NINE = [
+  { tex: String.raw`[Q] = \begin{bmatrix} ${hc("a", "Q_{11}")} & ${hc("a", "Q_{12}")} & ${hc("a", "Q_{13}")} \\ ${hc("b", "Q_{21}")} & ${hc("b", "Q_{22}")} & ${hc("b", "Q_{23}")} \\ ${hc("c", "Q_{31}")} & ${hc("c", "Q_{32}")} & ${hc("c", "Q_{33}")} \end{bmatrix} \qquad \text{9 numbers}` },
+  {
+    rule: "Each row is an axis, so each row has length 1", marks: ["a", "b", "c"],
+    tex: String.raw`\begin{gathered} ${hc("a", "Q_{11}^2+Q_{12}^2+Q_{13}^2")} = 1 \\ ${hc("b", "Q_{21}^2+Q_{22}^2+Q_{23}^2")} = 1 \\ ${hc("c", "Q_{31}^2+Q_{32}^2+Q_{33}^2")} = 1 \end{gathered}`,
+  },
+  {
+    rule: "The three axes are at right angles, so each pair of rows has dot product 0", marks: ["a", "b", "c"],
+    tex: String.raw`\begin{gathered} ${hc("a", "\\text{row}_1")} \cdot ${hc("b", "\\text{row}_2")} = 0 \\ ${hc("a", "\\text{row}_1")} \cdot ${hc("c", "\\text{row}_3")} = 0 \\ ${hc("b", "\\text{row}_2")} \cdot ${hc("c", "\\text{row}_3")} = 0 \end{gathered}`,
+  },
+  { rule: "Count: 3 + 3 equations tie up 6 of the 9 numbers", tex: String.raw`9 - 6 = 3 \ \text{numbers you can choose freely}` },
+  { rule: "Written as one matrix equation, those six say this", tex: String.raw`[Q][Q]^T = I \quad\Longrightarrow\quad [Q]^{-1} = [Q]^T` },
+];
+
+const QANG = [
+  { tex: String.raw`[Q]_{321} = \begin{bmatrix} ${hc("b", "c\\alpha\\, c\\beta")} & ${hc("b", "s\\alpha\\, c\\beta")} & ${hc("a", "-s\\beta")} \\ \cdots & \cdots & ${hc("c", "c\\beta\\, s\\gamma")} \\ \cdots & \cdots & ${hc("c", "c\\beta\\, c\\gamma")} \end{bmatrix}` },
+  { rule: "Q₁₃ is the only entry with β on its own", marks: ["a"], tex: String.raw`${hc("a", "Q_{13} = -\\sin\\beta")} \quad\Longrightarrow\quad \beta = \sin^{-1}(-Q_{13})` },
+  {
+    rule: "Divide Q₁₂ by Q₁₁: cos β is in both, so it cancels", marks: ["b"],
+    tex: String.raw`\frac{${hc("b", "Q_{12}")}}{${hc("b", "Q_{11}")}} = \frac{\sin\alpha\,\cancel{\cos\beta}}{\cos\alpha\,\cancel{\cos\beta}} = \tan\alpha \quad\Longrightarrow\quad \alpha = \tan^{-1}\frac{Q_{12}}{Q_{11}}`,
+  },
+  {
+    rule: "Same trick down the last column with Q₂₃ and Q₃₃", marks: ["c"],
+    tex: String.raw`\frac{${hc("c", "Q_{23}")}}{${hc("c", "Q_{33}")}} = \frac{\cancel{\cos\beta}\,\sin\gamma}{\cancel{\cos\beta}\,\cos\gamma} = \tan\gamma \quad\Longrightarrow\quad \gamma = \tan^{-1}\frac{Q_{23}}{Q_{33}}`,
+  },
+  {
+    rule: "Two things to watch",
+    tex: String.raw`\begin{gathered} \text{The cancelling needs } \cos\beta \ne 0. \\ \text{The signs of the top and bottom pick the quadrant (atan2).} \end{gathered}`,
+  },
+];
+
+const TRACE = [
+  {
+    tex: String.raw`\begin{aligned} Q_{11} &= ${hc("a", "u_x^2")}(1-\cos\theta) + ${hc("b", "\\cos\\theta")} \\ Q_{22} &= ${hc("a", "u_y^2")}(1-\cos\theta) + ${hc("b", "\\cos\\theta")} \\ Q_{33} &= ${hc("a", "u_z^2")}(1-\cos\theta) + ${hc("b", "\\cos\\theta")} \end{aligned}`,
+  },
+  {
+    rule: "Add the three. The u² terms share (1 − cos θ); the cos θ terms make three", marks: ["a", "b"],
+    tex: String.raw`Q_{11}+Q_{22}+Q_{33} = (${hc("a", "u_x^2+u_y^2+u_z^2")})(1-\cos\theta) + ${hc("b", "3\\cos\\theta")}`,
+  },
+  { rule: "û has length 1, so that bracket is 1", marks: ["a"], tex: String.raw`= ${hc("a", "1")}\cdot(1-\cos\theta) + 3\cos\theta = 1 + 2\cos\theta` },
+  { rule: "Solve for cos θ", tex: String.raw`\cos\theta = \frac{Q_{11}+Q_{22}+Q_{33}-1}{2}` },
+];
+
+const DIFF = [
+  {
+    tex: String.raw`\begin{aligned} Q_{23} &= ${hc("b", "u_yu_z(1-\\cos\\theta)")} + ${hc("c", "u_x\\sin\\theta")} \\ Q_{32} &= ${hc("b", "u_yu_z(1-\\cos\\theta)")} - ${hc("c", "u_x\\sin\\theta")} \end{aligned}`,
+  },
+  { rule: "Subtract. The matching parts cancel and the sin θ parts double", marks: ["b", "c"], tex: String.raw`Q_{23} - Q_{32} = ${hc("c", "2u_x\\sin\\theta")}` },
+  { rule: "Same for the other two pairs", tex: String.raw`\begin{gathered} Q_{31} - Q_{13} = 2u_y\sin\theta \\ Q_{12} - Q_{21} = 2u_z\sin\theta \end{gathered}` },
+  { rule: "Divide by 2 sin θ", tex: String.raw`\hat u = \frac{1}{2\sin\theta}\begin{bmatrix} Q_{23}-Q_{32} \\ Q_{31}-Q_{13} \\ Q_{12}-Q_{21}\end{bmatrix}` },
+  { rule: "Why the signs come out right", tex: String.raw`\begin{gathered} 0^\circ < \theta < 180^\circ \ \Rightarrow\ \sin\theta > 0 \\ \text{dividing by a positive number keeps every sign} \end{gathered}` },
+];
+
+const SARQ = [
+  { tex: String.raw`[Q] = ${hc("a", "\\cos\\theta\\, I")} + ${hc("b", "(1-\\cos\\theta)\\,\\hat u\\hat u^T")} - ${hc("c", "\\sin\\theta\\,[\\hat u\\times]")}` },
+  {
+    rule: "Piece 1 turns nothing yet: it's cos θ down the diagonal", marks: ["a"],
+    tex: String.raw`${hc("a", "\\cos\\theta\\, I")} = \begin{bmatrix} c\theta & 0 & 0 \\ 0 & c\theta & 0 \\ 0 & 0 & c\theta \end{bmatrix}`,
+  },
+  {
+    rule: "Piece 2 is the part along û, which the turn never touches", marks: ["b"],
+    tex: String.raw`${hc("b", "(1-c\\theta)\\,\\hat u\\hat u^T")} = (1-c\theta)\begin{bmatrix} u_x^2 & u_xu_y & u_xu_z \\ u_xu_y & u_y^2 & u_yu_z \\ u_xu_z & u_yu_z & u_z^2 \end{bmatrix}`,
+  },
+  {
+    rule: "Piece 3 is the cross-product part that does the turning", marks: ["c"],
+    tex: String.raw`-${hc("c", "s\\theta\\,[\\hat u\\times]")} = -s\theta\begin{bmatrix} 0 & -u_z & u_y \\ u_z & 0 & -u_x \\ -u_y & u_x & 0 \end{bmatrix}`,
+  },
+  {
+    rule: "Add the three, entry by entry", marks: ["a", "b", "c"],
+    tex: String.raw`[Q] = \begin{bmatrix} ${hc("b", "u_x^2(1-c\\theta)")}+${hc("a", "c\\theta")} & ${hc("b", "u_xu_y(1-c\\theta)")}+${hc("c", "u_zs\\theta")} & ${hc("b", "u_xu_z(1-c\\theta)")}-${hc("c", "u_ys\\theta")} \\ ${hc("b", "u_xu_y(1-c\\theta)")}-${hc("c", "u_zs\\theta")} & ${hc("b", "u_y^2(1-c\\theta)")}+${hc("a", "c\\theta")} & ${hc("b", "u_yu_z(1-c\\theta)")}+${hc("c", "u_xs\\theta")} \\ ${hc("b", "u_xu_z(1-c\\theta)")}+${hc("c", "u_ys\\theta")} & ${hc("b", "u_yu_z(1-c\\theta)")}-${hc("c", "u_xs\\theta")} & ${hc("b", "u_z^2(1-c\\theta)")}+${hc("a", "c\\theta")} \end{bmatrix}`,
+  },
+];
+
+const QUAT = [
+  { tex: String.raw`\bar{\bar q} = \begin{bmatrix} ${hc("a", "\\bar q")} \\ ${hc("b", "q_4")} \end{bmatrix} = \begin{bmatrix} ${hc("a", "\\hat u\\,\\sin(\\theta/2)")} \\ ${hc("b", "\\cos(\\theta/2)")} \end{bmatrix}` },
+  { rule: "Split the vector part into its x, y, z pieces", marks: ["a"], tex: String.raw`q_1 = u_x\sin\tfrac{\theta}{2},\quad q_2 = u_y\sin\tfrac{\theta}{2},\quad q_3 = u_z\sin\tfrac{\theta}{2}` },
+  {
+    rule: "Its length is always 1", marks: ["c"],
+    tex: String.raw`\begin{aligned} q_1^2+q_2^2+q_3^2+q_4^2 &= (${hc("c", "u_x^2+u_y^2+u_z^2")})\sin^2\tfrac{\theta}{2} + \cos^2\tfrac{\theta}{2} \\ &= ${hc("c", "1")}\cdot\sin^2\tfrac{\theta}{2} + \cos^2\tfrac{\theta}{2} = 1 \end{aligned}`,
+  },
+  { rule: "Going back: q₄ gives the angle", marks: ["b"], tex: String.raw`${hc("b", "q_4 = \\cos\\tfrac{\\theta}{2}")} \ \Longrightarrow\ \theta = 2\cos^{-1}(q_4)` },
+  {
+    rule: "Then divide the vector part by sin(θ/2). Dividing keeps the signs; squaring and rooting would lose them", marks: ["a"],
+    tex: String.raw`${hc("a", "\\bar q = \\hat u\\,\\sin\\tfrac{\\theta}{2}")} \ \Longrightarrow\ \hat u = \frac{\bar q}{\sin(\theta/2)}`,
+  },
+  {
+    rule: "Flip every sign and rewrite it", marks: ["d"],
+    tex: String.raw`\begin{aligned} -\bar{\bar q} &= \begin{bmatrix} -\hat u\,\sin\frac{\theta}{2} \\ -\cos\frac{\theta}{2}\end{bmatrix} \\ &= \begin{bmatrix} ${hc("d", "(-\\hat u)")}\,\sin\frac{${hc("d", "360^\\circ-\\theta")}}{2} \\ \cos\frac{${hc("d", "360^\\circ-\\theta")}}{2}\end{bmatrix} \end{aligned}`,
+  },
+  {
+    rule: "Read it as a turn", marks: ["d"],
+    tex: String.raw`\begin{gathered} \text{a turn of } ${hc("d", "360^\\circ-\\theta")} \text{ about } ${hc("d", "-\\hat u")} \\ \text{lands in the same place, so } \bar{\bar q} \text{ and } -\bar{\bar q} \text{ match} \end{gathered}`,
+  },
+];
+
 export default function MathPage() {
-  const T = useTheme();
-  const cE = T.rep.euler, cS = T.rep.sar, cQ = T.rep.quat;
   const { hash } = useLocation();
   useEffect(() => {
     if (!hash) return;
@@ -223,19 +305,12 @@ export default function MathPage() {
   return (
     <>
       <p className="lede">
-        The chapters show what each formula does. This page shows where they come from, one line at a time.
-        Hit <b>Next step</b> to walk through each derivation.
+        The chapters show what each formula does. This page shows where each one comes from, one move at a time.
+        Hover or tap the notes between the boxes to light up the pieces they&apos;re talking about.
       </p>
 
       <h2 id="nine-to-three">Why nine numbers only have three free</h2>
-      <p>The three rows of <M>[Q]</M> are the three body axes. Axes have length 1 and are at right angles. Write that down:</p>
-      <Steps tone="dcm">
-        <TeX block>{String.raw`\begin{gathered}\text{Each row has length 1:}\\ Q_{11}^2+Q_{12}^2+Q_{13}^2 = 1 \\ Q_{21}^2+Q_{22}^2+Q_{23}^2 = 1 \\ Q_{31}^2+Q_{32}^2+Q_{33}^2 = 1\end{gathered}`}</TeX>
-        <TeX block>{String.raw`\begin{gathered}\text{Rows are perpendicular:}\\ Q_{11}Q_{21}+Q_{12}Q_{22}+Q_{13}Q_{23} = 0 \\ Q_{11}Q_{31}+Q_{12}Q_{32}+Q_{13}Q_{33} = 0 \\ Q_{21}Q_{31}+Q_{22}Q_{32}+Q_{23}Q_{33} = 0\end{gathered}`}</TeX>
-        <TeX block>{String.raw`\text{That's } 3 + 3 = 6 \text{ equations on } 9 \text{ unknowns.}`}</TeX>
-        <TeX block>{String.raw`9 - 6 = 3 \ \text{numbers you can choose. The other six are forced.}`}</TeX>
-        <TeX block>{String.raw`\text{Together the six say } [Q][Q]^T = I \ \Rightarrow\ [Q]^{-1} = [Q]^T`}</TeX>
-      </Steps>
+      <MathFlow tone="dcm" steps={NINE} />
       <p>Here&apos;s the same count done by hand. Pick the rows one at a time and watch the choices shrink:</p>
       <Builder />
 
@@ -246,43 +321,23 @@ export default function MathPage() {
       </p>
       <Multiply />
 
-      <h2 id="q-to-angles">[Q] to angles: picking out one angle at a time</h2>
-      <p>
-        Look for entries where only one angle survives, or where a ratio makes the others cancel. Three do the job:
-        <TeX>{String.raw`Q_{13}`}</TeX>, the pair <TeX>{String.raw`Q_{12}, Q_{11}`}</TeX>, and the pair <TeX>{String.raw`Q_{23}, Q_{33}`}</TeX>.
-      </p>
-      <Steps tone="euler">
-        <TeX block>{String.raw`[Q] = \begin{bmatrix} \color{${cE}}{c\alpha\, c\beta} & \color{${cE}}{s\alpha\, c\beta} & \color{${cS}}{-s\beta} \\ \cdots & \cdots & \color{${cQ}}{c\beta\, s\gamma} \\ \cdots & \cdots & \color{${cQ}}{c\beta\, c\gamma} \end{bmatrix}`}</TeX>
-        <TeX block>{String.raw`\color{${cS}}{Q_{13} = -\sin\beta} \quad\Longrightarrow\quad \beta = \sin^{-1}(-Q_{13})`}</TeX>
-        <TeX block>{String.raw`\color{${cE}}{\frac{Q_{12}}{Q_{11}} = \frac{\sin\alpha\,\cancel{\cos\beta}}{\cos\alpha\,\cancel{\cos\beta}} = \tan\alpha} \quad\Longrightarrow\quad \alpha = \tan^{-1}\frac{Q_{12}}{Q_{11}}`}</TeX>
-        <TeX block>{String.raw`\color{${cQ}}{\frac{Q_{23}}{Q_{33}} = \frac{\cancel{\cos\beta}\,\sin\gamma}{\cancel{\cos\beta}\,\cos\gamma} = \tan\gamma} \quad\Longrightarrow\quad \gamma = \tan^{-1}\frac{Q_{23}}{Q_{33}}`}</TeX>
-        <TeX block>{String.raw`\text{The cancelling needs } \cos\beta \ne 0,\ \text{and the signs of the top and bottom pick the quadrant (atan2).}`}</TeX>
-      </Steps>
+      <h2 id="q-to-angles">[Q] to angles: one angle at a time</h2>
+      <MathFlow tone="euler" steps={QANG} />
 
-      <h2 id="sar">SAR and [Q]: the trace and the differences</h2>
-      <p>Start from the SAR matrix and add up the diagonal:</p>
-      <Steps tone="sar">
-        <TeX block>{String.raw`Q_{11}+Q_{22}+Q_{33} = (u_x^2+u_y^2+u_z^2)(1-\cos\theta) + 3\cos\theta`}</TeX>
-        <TeX block>{String.raw`= 1\cdot(1-\cos\theta) + 3\cos\theta = 1 + 2\cos\theta \qquad (\text{because } |\hat u| = 1)`}</TeX>
-        <TeX block>{String.raw`\Longrightarrow\quad \cos\theta = \frac{Q_{11}+Q_{22}+Q_{33}-1}{2}`}</TeX>
-        <TeX block>{String.raw`\text{Now subtract across the diagonal. The } u_iu_j(1-\cos\theta) \text{ parts are equal on both sides and cancel:}`}</TeX>
-        <TeX block>{String.raw`Q_{23}-Q_{32} = \big[\cancel{u_yu_z(1-c\theta)} + u_x s\theta\big] - \big[\cancel{u_yu_z(1-c\theta)} - u_x s\theta\big] = 2u_x\sin\theta`}</TeX>
-        <TeX block>{String.raw`\text{Same for the others:}\quad Q_{31}-Q_{13} = 2u_y\sin\theta, \qquad Q_{12}-Q_{21} = 2u_z\sin\theta`}</TeX>
-        <TeX block>{String.raw`\Longrightarrow\quad \hat u = \frac{1}{2\sin\theta}\,\big(Q_{23}-Q_{32},\ Q_{31}-Q_{13},\ Q_{12}-Q_{21}\big)`}</TeX>
-        <TeX block>{String.raw`\text{With } 0^\circ < \theta < 180^\circ,\ \sin\theta > 0, \text{ so the signs of } \hat u \text{ come straight from the differences.}`}</TeX>
-      </Steps>
+      <h2 id="sar">SAR from [Q]: the trace</h2>
+      <MathFlow tone="sar" steps={TRACE} />
+      <h2 id="sar-axis">SAR from [Q]: the differences</h2>
+      <MathFlow tone="sar" steps={DIFF} />
+
+      <h2 id="sar-to-q">Where the SAR matrix comes from</h2>
+      <p>
+        The big SAR matrix is three simple matrices added together. One keeps the part of a vector along û, the other
+        two turn the part at right angles to û by θ.
+      </p>
+      <MathFlow tone="sar" steps={SARQ} />
 
       <h2 id="quaternion">Quaternions and the SAR</h2>
-      <p>A quaternion is the SAR with half the angle:</p>
-      <Steps tone="quat">
-        <TeX block>{String.raw`\bar{\bar q} = \begin{bmatrix}\bar q\\ q_4\end{bmatrix} = \begin{bmatrix}\hat u\,\sin(\theta/2)\\ \cos(\theta/2)\end{bmatrix}`}</TeX>
-        <TeX block>{String.raw`\text{Split the vector part:}\quad q_1 = u_x\sin\tfrac{\theta}{2},\quad q_2 = u_y\sin\tfrac{\theta}{2},\quad q_3 = u_z\sin\tfrac{\theta}{2}`}</TeX>
-        <TeX block>{String.raw`\text{Length: } q_1^2+q_2^2+q_3^2+q_4^2 = \underbrace{(u_x^2+u_y^2+u_z^2)}_{1}\sin^2\tfrac{\theta}{2} + \cos^2\tfrac{\theta}{2} = 1`}</TeX>
-        <TeX block>{String.raw`\text{Back to the SAR: } q_4 = \cos\tfrac{\theta}{2} \ \Longrightarrow\ \theta = 2\cos^{-1}(q_4)`}</TeX>
-        <TeX block>{String.raw`\bar q = \hat u\,\sin\tfrac{\theta}{2} \ \Longrightarrow\ \hat u = \frac{\bar q}{\sin(\theta/2)} \qquad (\text{divide, don't square and root, so the signs survive})`}</TeX>
-        <TeX block>{String.raw`-\bar{\bar q} = \begin{bmatrix}-\hat u\,\sin\frac{\theta}{2}\\ -\cos\frac{\theta}{2}\end{bmatrix} = \begin{bmatrix}(-\hat u)\sin\frac{360^\circ-\theta}{2}\\ \cos\frac{360^\circ-\theta}{2}\end{bmatrix}`}</TeX>
-        <TeX block>{String.raw`\text{That's a turn of } 360^\circ-\theta \text{ about } -\hat u: \text{ the same attitude. So } \bar{\bar q} \text{ and } -\bar{\bar q} \text{ match.}`}</TeX>
-      </Steps>
+      <MathFlow tone="quat" steps={QUAT} />
       <p>
         Why half angles? When a quaternion rotates a vector, it gets applied twice: once on each side of the vector.
         Each copy carries half the turn, so the two halves add up to the full <M>θ</M>.

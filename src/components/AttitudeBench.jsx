@@ -95,6 +95,7 @@ export default function AttitudeBench() {
   const [highlight, setHighlight] = useState(null);
   const [showInertial, setShowInertial] = useState(true);
   const [showBody, setShowBody] = useState(true);
+  const [craft, setCraft] = useState("solid");
   const [showCards, setShowCards] = usePref("cards", { dcm: true, euler: true, sar: true, quat: true });
   const [dock, setDock] = usePref("dock", "side");
   const [showSAR, setShowSAR] = useState(true);
@@ -227,7 +228,7 @@ export default function AttitudeBench() {
   const spin = useMemo(() => {
     if (!frame || !frame.spin) return null;
     if (sarAnim) return { ...frame.spin, color: T.rep.sar, label: { letter: "û", sub: "" } };
-    return { ...frame.spin, color: T.axis[frame.spin.axisIndex] };
+    return { ...frame.spin, color: frame.spin.label.sub ? T.inter[frame.spin.axisIndex] : T.axis[frame.spin.axisIndex] };
   }, [frame, sarAnim, T]);
 
   const sarProp = useMemo(() => {
@@ -242,7 +243,11 @@ export default function AttitudeBench() {
     () => (highlight === null || playing ? undefined : [{ vec: Q[highlight], frame: "inertial" }]),
     [highlight, Q, playing],
   );
-  const toggleAxis = useCallback((i) => setHighlight((h) => (h === i ? null : i)), []);
+  // turning an axis on also makes the spacecraft see-through, so the shadows aren't buried in it
+  const toggleAxis = useCallback((i) => {
+    setHighlight((h) => (h === i ? null : i));
+    setCraft((c) => (c === "solid" ? "ghost" : c));
+  }, []);
 
   /* ---------- caption over the scene while a scene plays ---------- */
 
@@ -252,7 +257,7 @@ export default function AttitudeBench() {
     if (k < 3) {
       const ax = eulerAnim.seq;
       caption = (
-        <div className="caption" style={{ "--c": T.axis[ax[k] - 1] }}>
+        <div className="caption" style={{ "--c": k === 0 ? T.axis[ax[k] - 1] : T.inter[ax[k] - 1] }}>
           Step {k + 1} of 3: <span className="m">{GREEK[k]}</span> = {fmt(frame.part[k], 1)}° about <AxisName seq={ax} k={k} />
         </div>
       );
@@ -312,7 +317,7 @@ export default function AttitudeBench() {
         <div className="pg-stage">
           <div className="scene pg-view">
             <Viewport
-              quat={shown} onDrag={onDrag} highlight={highlight} showInertial={showInertial} showBody={showBody}
+              quat={shown} onDrag={onDrag} highlight={highlight} showInertial={showInertial} showBody={showBody} craft={craft}
               sar={sarProp} ghosts={ghosts} spin={spin} onInteract={interact} projections={projections}
             />
             {dock === "scene" && <SceneReadouts show={showCards} Q={Q} ea={ea} sar={sar} qc={qc} seq={seq} T={T} />}
@@ -344,6 +349,11 @@ export default function AttitudeBench() {
               onClick={() => setShowSAR((v) => !v)}>
               <span className="sw" /> SAR axis and <span className="m">θ</span>
             </button>
+            <span className="seg craft-seg" role="group" aria-label="Spacecraft">
+              {[["solid", "Solid"], ["ghost", "See-through"], ["hidden", "Hidden"]].map(([k, l]) => (
+                <button key={k} type="button" aria-pressed={craft === k} onClick={() => setCraft(k)}>{l}</button>
+              ))}
+            </span>
             <span className="axis-picks" role="group" aria-label="Show where a body axis's numbers come from">
               {[0, 1, 2].map((i) => (
                 <button key={i} type="button" className="axis-pick" aria-pressed={highlight === i}
@@ -610,7 +620,7 @@ function EulerPlayer({ anim, frame, T, onToggle, onScrub, onStep, onClose }) {
       <div className="steps" style={{ marginBottom: 10 }}>
         {[0, 1, 2].map((j) => (
           <button key={j} type="button" className={`step${k === j ? " on" : ""}${k > j ? " done" : ""}`}
-            style={{ "--c": T.axis[anim.seq[j] - 1] }} onClick={() => onStep(j)} title={`Play just the ${GREEK[j]} turn`}>
+            style={{ "--c": j === 0 ? T.axis[anim.seq[j] - 1] : T.inter[anim.seq[j] - 1] }} onClick={() => onStep(j)} title={`Play just the ${GREEK[j]} turn`}>
             <b>{GREEK[j]}</b> about <AxisName seq={anim.seq} k={j} />
           </button>
         ))}

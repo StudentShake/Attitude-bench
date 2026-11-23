@@ -33,15 +33,15 @@ function Sidebar() {
   return (
     <nav className="tut-side" aria-label="Chapters">
       {CHAPTERS.map((c) => c.ready ? (
-        <NavLink key={c.slug} to={`/tutorial/${c.slug}`} className={({ isActive }) => `chap${isActive ? " on" : ""}`}
+        <NavLink key={c.slug} to={`/tutorial/${c.slug}`} className={({ isActive }) => `chap${c.math ? " math" : ""}${isActive ? " on" : ""}`}
           style={{ "--c": col(c) }}>
-          <span className="chap-n">{c.n}</span>
+          <span className="chap-n">{c.icon || c.n}</span>
           <span className="chap-t">{c.title}</span>
         </NavLink>
       ) : (
-        <span key={c.slug} className="chap soon" title="Coming later">
+        <span key={c.slug} className="chap soon" title={c.status === "planned" ? "Planned" : "Coming soon"}>
           <span className="chap-n">{c.n}</span>
-          <span className="chap-t">{c.title}<em>soon</em></span>
+          <span className="chap-t">{c.title}<em>{c.status === "planned" ? "planned" : "soon"}</em></span>
         </span>
       ))}
     </nav>

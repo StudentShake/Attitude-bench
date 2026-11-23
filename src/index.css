@@ -524,3 +524,59 @@ label.blk { display: block; margin-top: 6px; }
 .smat > span.on { background: color-mix(in srgb, var(--c) 18%, transparent); }
 .smat > span.cur { background: color-mix(in srgb, var(--primary) 30%, transparent); outline: 2px solid var(--primary); }
 .smat .katex { font-size: 1em; }
+.craft-seg button { padding: 4px 10px; font-size: 13px; }
+
+/* ---------- derivation flowcharts ---------- */
+
+.mflow { margin: 16px 0 24px; }
+.mflow-node { border-radius: var(--r); background: var(--card); border: 1.5px solid color-mix(in srgb, var(--c) 45%, var(--line)); box-shadow: var(--shadow); padding: 2px 10px; }
+.mflow-node .eq { margin: 6px 0; background: transparent; border: none; font-size: 16.5px; padding: 8px 2px; }
+.mflow-node .katex-display > .katex { white-space: normal; }
+.mflow-link { position: relative; display: flex; align-items: center; min-height: 50px; padding-left: 58px; }
+.mflow-arrow { position: absolute; left: 30px; top: 0; bottom: 0; border-left: 3px solid var(--faint); }
+.mflow-arrow::after { content: ""; position: absolute; left: -8.5px; bottom: -1px; border: 7px solid transparent; border-top: 10px solid var(--faint); border-bottom: 0; }
+.mflow-rule {
+  font: 600 14px var(--sans); text-align: left; padding: 6px 12px; border-radius: 12px; cursor: help;
+  border: 1.5px dashed color-mix(in srgb, var(--c) 60%, var(--line)); background: color-mix(in srgb, var(--c) 10%, var(--card)); color: var(--text);
+}
+.mflow-rule:hover, .mflow-rule.on { border-style: solid; background: color-mix(in srgb, var(--c) 22%, var(--card)); }
+.mflow .m-a, .mflow .m-b, .mflow .m-c, .mflow .m-d { border-radius: 5px; transition: background .15s, box-shadow .15s; padding: 0 1px; }
+.mflow.hl-a .m-a { background: color-mix(in srgb, #FFC53D 45%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, #FFC53D 70%, transparent); }
+.mflow.hl-b .m-b { background: color-mix(in srgb, #5FA8FF 40%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, #5FA8FF 70%, transparent); }
+.mflow.hl-c .m-c { background: color-mix(in srgb, #F783C6 40%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, #F783C6 70%, transparent); }
+.mflow.hl-d .m-d { background: color-mix(in srgb, #4ADE80 40%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, #4ADE80 70%, transparent); }
+@media (max-width: 520px) { .mflow-node .eq { font-size: 14px; } }
+.teaser { display: flex; gap: 12px; align-items: center; margin-top: 12px; padding: 12px 14px; border-radius: 14px; border: 1.5px dashed var(--line); text-decoration: none; cursor: default; font-size: 15px; }
+.hunt-mat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-width: 460px; margin: 0 auto; }
+.hunt-mat > span { position: relative; padding: 16px 10px 8px; border-radius: 12px; background: var(--bg2); border: 1.5px solid var(--line); font-family: var(--mono); font-size: 16px; text-align: right; transition: all .35s ease; }
+.hunt-mat > span > small { position: absolute; left: 8px; top: 4px; font-family: var(--sans); font-size: 11px; color: var(--faint); }
+.hunt-mat > span.on { border-color: var(--c); background: color-mix(in srgb, var(--c) 20%, var(--bg2)); transform: scale(1.05); box-shadow: 0 6px 18px -8px var(--c); }
+.hunt-step { display: flex; gap: 12px; align-items: flex-start; margin: 16px auto 0; max-width: 560px; padding: 12px 14px; border-radius: 14px; border-left: 5px solid var(--c); background: color-mix(in srgb, var(--c) 9%, var(--card)); font-size: 16px; min-height: 64px; }
+.hunt-n { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 8px; background: var(--c); color: #12121a; font: 800 13px/26px var(--display); text-align: center; }
+.hunt-dots { display: flex; gap: 6px; justify-content: center; margin-top: 10px; }
+.hunt-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+.hunt-dots i.on { background: var(--primary); }
+.hunt .mstep-ctl { justify-content: center; }
+.rules { display: flex; flex-direction: column; gap: 0; }
+.rule-start, .rule-end { padding: 12px 14px; border-radius: 14px; background: var(--bg2); font-size: 15px; }
+.rule-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; position: relative; padding: 26px 0; }
+.rule-row::before { content: ""; position: absolute; left: 16.6%; right: 16.6%; top: 12px; border-top: 2.5px solid var(--faint); }
+.rule-row::after { content: ""; position: absolute; left: 50%; top: 0; height: 12px; border-left: 2.5px solid var(--faint); }
+.rule-box { position: relative; padding: 12px; border-radius: 14px; border: 2px solid var(--c); background: color-mix(in srgb, var(--c) 10%, var(--card)); display: flex; flex-direction: column; gap: 4px; font-size: 14.5px; }
+.rule-box::before { content: ""; position: absolute; left: 50%; top: -16px; height: 14px; border-left: 2.5px solid var(--faint); }
+.rule-box b { font-family: var(--display); font-size: 17px; color: color-mix(in srgb, var(--c) 80%, var(--text)); }
+@media (max-width: 640px) { .rule-row { grid-template-columns: 1fr; } .rule-row::before, .rule-box::before { display: none; } }
+.two-pics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.two-pics svg { width: 100%; height: auto; display: block; }
+.pic-title { font-family: var(--display); font-weight: 750; font-size: 16px; text-align: center; }
+@media (max-width: 560px) { .two-pics { grid-template-columns: 1fr; } }
+.chain-mats { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; margin-top: 14px; }
+.chain-mats > div { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.chain-mats > span { font-size: 22px; color: var(--dim); }
+.cost { display: grid; gap: 6px; margin: 14px 0 22px; }
+.cost-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg2); font-size: 15px; align-items: center; }
+.cost-row.head { background: transparent; font-family: var(--display); font-weight: 800; font-size: 17px; }
+.chap.math { margin-top: 10px; border-top: 1.5px dashed var(--line); border-radius: 0 0 14px 14px; padding-top: 12px; }
+.chap.math .chap-n { font-size: 17px; font-family: var(--serif, "Times New Roman"); }
+.chap.math.on .chap-n { color: var(--bg); }
+@media (max-width: 900px) { .tut-side .chap.math { margin-top: 0; border-top: 1.5px solid var(--line); border-radius: 999px; padding-top: 6px; } }

@@ -167,6 +167,21 @@ function buildCraft(themed) {
   st.position.set(-0.22, 0.2, 0.62);
   body.add(st);
 
+  // everything above is "the craft"; an outline of it is used for the see-through mode
+  const meshes = body.children.slice();
+  const outlineMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 });
+  const outline = new THREE.Group();
+  meshes.forEach((m) => {
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), outlineMat);
+    e.position.copy(m.position); e.rotation.copy(m.rotation); e.scale.copy(m.scale);
+    outline.add(e);
+  });
+  outline.visible = false;
+  body.add(outline);
+  themed.craftMeshes = meshes;
+  themed.outline = outline;
+  themed.outlineMat = outlineMat;
+
   return body;
 }
 
@@ -287,7 +302,7 @@ function buildGizmo(container, onPick) {
 export default function Viewport({
   quat, onDrag, highlight = null, showInertial = true, sar = null,
   ghosts = EMPTY, spin = null, gizmo = true, autoSpin = 0, labels = true,
-  onInteract, view = START, showBody = true, projections = EMPTY,
+  onInteract, view = START, showBody = true, projections = EMPTY, craft = "solid",
 }) {
   const T = useTheme();
   const mountRef = useRef(null);
@@ -404,16 +419,16 @@ export default function Viewport({
     scene.add(spinLabel);
 
     /* projections: where the numbers of a vector live on a frame's axes */
-    const proj = [0, 1].map(() => [0, 1, 2].map(() => {
+    const proj = [0, 1, 2].map(() => [0, 1, 2].map(() => {
       const segMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, depthTest: false });
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 12), segMat);
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 10), segMat);
       seg.renderOrder = 5;
       const dropMat = new THREE.LineDashedMaterial({ dashSize: 0.06, gapSize: 0.05, transparent: true, opacity: 0.9, depthTest: false });
       const drop = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(1, 0, 0)]), dropMat);
       drop.renderOrder = 5;
-      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 10), segMat);
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 10), segMat);
       dot.renderOrder = 6;
-      const lab = makeLabel(0.26, true);
+      const lab = makeLabel(0.38, true);
       [seg, drop, dot, lab].forEach((o) => { o.visible = false; scene.add(o); });
       return { seg, segMat, drop, dropMat, dot, lab, key: "" };
     }));
@@ -603,7 +618,8 @@ export default function Viewport({
     const th = s.themed;
     th.inertial.forEach((m, i) => m.color.set(T.axis[i]));
     th.body.forEach((m, i) => m.color.set(T.axis[i]));
-    th.ghost.forEach(({ m, i }) => m.color.set(T.axis[i]));
+    th.ghost.forEach(({ m, i }) => m.color.set(T.inter[i]));
+    th.outlineMat.color.set(T.mode === "dark" ? 0xc9d4ea : 0x5a6378);
     th.bus.color.setHex(T.craft.bus);
     th.foil.color.setHex(T.craft.foil);
     th.frame.color.setHex(T.craft.frame);
@@ -662,7 +678,7 @@ export default function Viewport({
       g.quaternion.set(x, y, z, w);
       if (g.userData.mark !== gh.mark) {
         g.userData.labs.forEach((l, i) => paintLabel(l, {
-          text: "xyz"[i], sub: gh.mark || "", color: "#ffffff", badge: withAlpha(T.axis[i], 0.82),
+          text: "xyz"[i], sub: gh.mark || "", color: T.mode === "dark" ? "#0D1322" : "#ffffff", badge: withAlpha(T.inter[i], 0.92),
         }));
         g.userData.mark = gh.mark;
       }
@@ -690,9 +706,9 @@ export default function Viewport({
       if (s.spinArc.line.visible) drawArc(s.spinArc, n, spin.arcFrom, spin.angle, 1.55);
       s.spinLabel.visible = !!spin.label;
       if (spin.label) {
-        const key = `${spin.label.letter}${spin.label.sub}${spin.color}`;
+        const key = `${spin.label.letter}${spin.label.sub}${spin.color}${T.mode}`;
         if (s.spinKey !== key) {
-          paintLabel(s.spinLabel, { prefix: "about", text: spin.label.letter, sub: spin.label.sub, color: "#ffffff", badge: spin.color });
+          paintLabel(s.spinLabel, { prefix: "about", text: spin.label.letter, sub: spin.label.sub, color: T.mode === "dark" ? "#0D1322" : "#ffffff", badge: spin.color });
           s.spinKey = key;
         }
         // put the tag on whichever end of the rod sits higher on screen, so it stays in view
@@ -702,7 +718,24 @@ export default function Viewport({
       s.spinLabel.visible = false;
     }
     s.invalidate();
-  }, [spin]);
+  }, [spin, T]);
+
+  /* spacecraft: solid, see-through outline, or hidden */
+  useEffect(() => {
+    const s = S.current;
+    if (!s.themed || !s.themed.craftMeshes) return;
+    const ghost = craft === "ghost";
+    s.themed.craftMeshes.forEach((m) => {
+      m.visible = craft !== "hidden";
+      const mat = m.material;
+      mat.transparent = ghost;
+      mat.opacity = ghost ? 0.1 : 1;
+      mat.depthWrite = !ghost;
+      mat.needsUpdate = true;
+    });
+    s.themed.outline.visible = ghost;
+    s.invalidate();
+  }, [craft]);
 
   /* projections: drop lines from a vector's tip onto a frame's axes */
   useEffect(() => {
@@ -722,14 +755,14 @@ export default function Viewport({
         const val = v.dot(axis);
         const tip = v.clone().multiplyScalar(L);
         const foot = axis.clone().multiplyScalar(val * L);
-        const col = T.axis[j];
+        const col = pr.color || T.axis[j];
         p.segMat.color.set(col);
         p.dropMat.color.set(col);
         p.segMat.opacity = pr.faint ? 0.55 : 0.95;
         const len = Math.abs(val * L);
         p.seg.visible = len > 1e-3;
         if (p.seg.visible) {
-          p.seg.scale.set(pr.faint ? 0.7 : 1, len, pr.faint ? 0.7 : 1);
+          p.seg.scale.set(pr.faint ? 0.8 : 1, len, pr.faint ? 0.8 : 1);
           p.seg.position.copy(foot).multiplyScalar(0.5);
           p.seg.quaternion.setFromUnitVectors(UNIT[1], foot.clone().normalize());
         }
@@ -739,13 +772,13 @@ export default function Viewport({
         p.drop.computeLineDistances();
         p.drop.geometry.computeBoundingSphere();
         // label sits just outside the foot, away from the origin
-        const out = foot.clone().add(axis.clone().multiplyScalar(Math.sign(val || 1) * 0.32));
+        const out = foot.clone().add(axis.clone().multiplyScalar(Math.sign(val || 1) * (0.42 + 0.12 * k)));
         p.lab.position.copy(out);
         p.lab.visible = pr.labels !== false;
         const text = (Math.abs(val) < 5e-4 ? 0 : val).toFixed(pr.digits ?? 3);
         const key = `${text}|${col}|${T.mode}`;
         if (p.key !== key) {
-          paintLabel(p.lab, { text, mono: true, color: "#ffffff", badge: withAlpha(col, pr.faint ? 0.7 : 0.92) });
+          paintLabel(p.lab, { text, mono: true, color: T.mode === "dark" ? "#0D1322" : "#ffffff", badge: withAlpha(col, pr.faint ? 0.7 : 0.92) });
           p.key = key;
         }
       });

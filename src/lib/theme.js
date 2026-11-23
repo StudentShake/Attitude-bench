@@ -25,6 +25,8 @@ export const DARK = {
   primary: "#FFC53D",
   onPrimary: "#1A1405",
   axis: ["#FF6B6B", "#4ADE80", "#5FA8FF"],
+  // intermediate frames (x1, y2…) get their own set so they never read as the body axes
+  inter: ["#FDBA74", "#BEF264", "#7DD3FC"],
   rep: { dcm: "#B197FC", euler: "#3BD5F0", sar: "#FFC53D", quat: "#F783C6" },
   inertial: "#8C97B5",
   craft: { bus: 0xd9a441, foil: 0xb07d22, panel: 0x2852a8, frame: 0xc9d2e3, dish: 0xeef2f8 },
@@ -46,6 +48,7 @@ export const LIGHT = {
   primary: "#F5B301",
   onPrimary: "#1B1404",
   axis: ["#E5484D", "#16A05A", "#2F6FEB"],
+  inter: ["#EA7A1E", "#7FA614", "#0E9BCB"],
   rep: { dcm: "#7B57F5", euler: "#0B9DBA", sar: "#D48A00", quat: "#D6337F" },
   inertial: "#7D869C",
   craft: { bus: 0xd8a23a, foil: 0xa8741c, panel: 0x2852a8, frame: 0xb9c3d6, dish: 0xffffff },
@@ -78,3 +81,9 @@ export const REPS = [
   { key: "sar", name: "SAR", symbol: "û, θ", long: "Single-axis rotation", count: 4 },
   { key: "quat", name: "Quaternion", symbol: "q", long: "Quaternion", count: 4 },
 ];
+
+/** Step 1 of a sequence turns about an inertial axis (axis colours); steps 2 and 3 about intermediate ones. */
+export function stepColor(T, seq, k) {
+  const a = seq[k] - 1;
+  return k === 0 ? T.axis[a] : T.inter[a];
+}

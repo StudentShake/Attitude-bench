@@ -1,11 +1,10 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
-import { EAToQ, QToEA, wrap360 } from "../../lib/course.js";
+import { EAToQ, wrap360 } from "../../lib/course.js";
 import { SEQUENCES } from "../../lib/attitude.js";
 import SequencePlayer from "../../components/SequencePlayer.jsx";
-import NumField from "../../components/NumField.jsx";
-import { Fig, M, Mat, Ask, TeX } from "./kit.jsx";
+import { Fig, M, Ask, TeX } from "./kit.jsx";
 
 const SYM = ["1-2-1", "1-3-1", "2-1-2", "2-3-2", "3-1-3", "3-2-3"];
 const ASYM = ["3-2-1", "2-3-1", "1-3-2", "3-1-2", "2-1-3", "1-2-3"];
@@ -60,29 +59,68 @@ function Order() {
   );
 }
 
-function BackOut() {
+/* ---------- pulling the angles out of a [Q], animated one move at a time ---------- */
+
+const rndInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const fresh = () => [rndInt(0, 359), rndInt(-75, 75), rndInt(0, 359)];
+
+function AngleHunt() {
   const T = useTheme();
-  const [a, setA] = useState([30, 20, 10]);
-  const Q = useMemo(() => EAToQ(a[0], a[1], a[2], [3, 2, 1]), [a]);
-  const back = QToEA(Q, [3, 2, 1]);
-  const G = ["α", "β", "γ"];
+  const [ang, setAng] = useState([210, 20, 10]);
+  const [k, setK] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const Q = useMemo(() => EAToQ(ang[0], ang[1], ang[2], [3, 2, 1]).map((r) => r.map((v) => Math.round(v * 1e4) / 1e4)), [ang]);
+  const f = (v, p = 4) => { const t = v.toFixed(p); return /^-0\.?0*$/.test(t) ? t.slice(1) : t; };
+  const beta = (Math.asin(-Q[0][2]) * 180) / Math.PI;
+  const aCalc = (Math.atan(Q[0][1] / Q[0][0]) * 180) / Math.PI;
+  const alpha = wrap360((Math.atan2(Q[0][1], Q[0][0]) * 180) / Math.PI);
+  const gCalc = (Math.atan(Q[1][2] / Q[2][2]) * 180) / Math.PI;
+  const gamma = wrap360((Math.atan2(Q[1][2], Q[2][2]) * 180) / Math.PI);
+  const fix = (calc, bottom) => (bottom < 0 ? "bottom is negative, so add 180°" : calc < 0 ? "bottom is positive, keep it (add 360° to land in 0 to 360°)" : "bottom is positive, keep it");
+  const back = EAToQ(alpha, beta, gamma, [3, 2, 1]);
+  const ok = back.every((r, i) => r.every((v, j) => Math.abs(v - Q[i][j]) < 2e-4));
+
+  const steps = [
+    { cells: [], color: T.rep.dcm, text: <>Here&apos;s a [Q]. Find α, β and γ for a 3-2-1 sequence.</> },
+    { cells: [[0, 2]], color: T.rep.sar, text: <>β first. Only Q₁₃ = −sin β has β alone: β = sin⁻¹(−({f(Q[0][2])})) = <b>{f(beta, 2)}°</b></> },
+    { cells: [[0, 1], [0, 0]], color: T.rep.euler, text: <>α from Q₁₂ / Q₁₁ = {f(Q[0][1])} / {f(Q[0][0])}. tan⁻¹ of that = <b>{f(aCalc, 2)}°</b></> },
+    { cells: [[0, 0]], color: T.rep.euler, text: <>Check the bottom, Q₁₁ = {f(Q[0][0])}: {fix(aCalc, Q[0][0])}. α = <b>{f(alpha, 2)}°</b></> },
+    { cells: [[1, 2], [2, 2]], color: T.rep.quat, text: <>γ from Q₂₃ / Q₃₃ = {f(Q[1][2])} / {f(Q[2][2])}. tan⁻¹ = {f(gCalc, 2)}°; {fix(gCalc, Q[2][2])}. γ = <b>{f(gamma, 2)}°</b></> },
+    { cells: "all", color: T.axis[1], text: <>Rebuild [Q] from {f(alpha, 1)}°, {f(beta, 1)}°, {f(gamma, 1)}° and compare: {ok ? "every entry matches ✓" : "it doesn't match, so an angle is in the wrong quadrant"}.</> },
+  ];
+  const st = steps[k];
+  const on = (i, j) => st.cells === "all" || st.cells.some(([a, b]) => a === i && b === j);
+
+  useEffect(() => {
+    if (!playing || k >= steps.length - 1) return;
+    const id = setTimeout(() => {
+      setK((x) => x + 1);
+      if (k + 1 >= steps.length - 1) setPlaying(false);
+    }, 2600);
+    return () => clearTimeout(id);
+  }, [playing, k, steps.length]);
+
   return (
-    <Fig caption="Type any three angles. The matrix is built with the 3-2-1 formula, then the angles are pulled back out of the highlighted entries.">
-      <div className="panel" style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center" }}>
-        <div style={{ display: "grid", gap: 8, flex: "0 0 150px" }}>
-          {[0, 1, 2].map((k) => (
-            <label key={k} style={{ display: "grid", gridTemplateColumns: "26px 1fr", alignItems: "center", gap: 6 }}>
-              <span className="m" style={{ fontSize: 20, color: T.axis[2 - k], fontWeight: 700 }}>{G[k]}</span>
-              <NumField value={String(a[k])} suffix="°" color={T.axis[2 - k]} label={G[k]}
-                onCommit={(v) => { const n = a.slice(); n[k] = v; setA(n); }} />
-            </label>
-          ))}
+    <Fig caption="Press play to watch the angles come out of the matrix one at a time, or step through by hand. New matrix gives you a fresh one with the answer hidden until the steps reach it.">
+      <div className="panel hunt">
+        <div className="hunt-mat" style={{ "--c": st.color }}>
+          {Q.map((row, i) => row.map((v, j) => (
+            <span key={`${i}${j}`} className={on(i, j) ? "on" : ""}>
+              <small>Q<sub>{i + 1}{j + 1}</sub></small>{f(v)}
+            </span>
+          )))}
         </div>
-        <div style={{ flex: "1 1 260px", textAlign: "center" }}>
-          <Mat rows={Q} digits={4} color={(r, c) => (r === 0 || c === 2 ? T.rep.euler : undefined)} />
-          <div className="small dim" style={{ marginTop: 12 }}>
-            Back out: <span className="m">α</span> = {back.alpha.toFixed(2)}°, <span className="m">β</span> = {back.beta.toFixed(2)}°, <span className="m">γ</span> = {back.gamma.toFixed(2)}°
-          </div>
+        <div className="hunt-step rise" key={`${k}-${ang.join()}`} style={{ "--c": st.color }}>
+          <span className="hunt-n">{k}</span><span>{st.text}</span>
+        </div>
+        <div className="hunt-dots">{steps.map((_, i) => <i key={i} className={i <= k ? "on" : ""} />)}</div>
+        <div className="mstep-ctl">
+          <button type="button" className="btn sm primary" onClick={() => { if (k >= steps.length - 1) setK(0); setPlaying((p) => !p); }}>
+            {playing ? "Pause" : k >= steps.length - 1 ? "Play again" : "Play"}
+          </button>
+          <button type="button" className="btn sm" disabled={k === 0} onClick={() => { setPlaying(false); setK(k - 1); }}>Back</button>
+          <button type="button" className="btn sm" disabled={k >= steps.length - 1} onClick={() => { setPlaying(false); setK(k + 1); }}>Next</button>
+          <button type="button" className="btn sm" onClick={() => { setPlaying(false); setK(0); setAng(fresh()); }}>New matrix</button>
         </div>
       </div>
     </Fig>
@@ -135,6 +173,16 @@ function Quadrant() {
                 ? <>Q₁₁ is negative, so α is on the left half. Add 180°: <b>{wrap360(calc + 180).toFixed(1)}°</b>.</>
                 : <>Q₁₁ is positive, so the calculator&apos;s answer is right{calc < 0 ? <> (as {wrap360(calc).toFixed(1)}° in 0 to 360°)</> : null}.</>}
             </p>
+            {(() => {
+              const ans = off ? wrap360(calc + 180) : wrap360(calc);
+              const ca = Math.cos((ans * Math.PI) / 180), sa = Math.sin((ans * Math.PI) / 180);
+              const same = (x, y) => Math.abs(x) < 1e-9 || Math.abs(y) < 1e-9 || Math.sign(x) === Math.sign(y);
+              return (
+                <p className="small" style={{ margin: "8px 0 0" }}>
+                  Check {ans.toFixed(1)}°: cos is {ca >= 0 ? "+" : "−"} like Q₁₁ {same(ca, q11) ? "✓" : "✗"}, sin is {sa >= 0 ? "+" : "−"} like Q₁₂ {same(sa, q12) ? "✓" : "✗"}
+                </p>
+              );
+            })()}
           </div>
         </div>
         <label style={{ display: "block", marginTop: 6 }}>
@@ -142,6 +190,31 @@ function Quadrant() {
           <input type="range" className="slider" min={0} max={359} value={alpha} style={{ "--c": T.rep.euler }}
             onChange={(e) => setAlpha(+e.target.value)} aria-label="alpha" />
         </label>
+      </div>
+    </Fig>
+  );
+}
+
+function QuadrantRules() {
+  const T = useTheme();
+  const box = (col, title, body) => (
+    <div className="rule-box" style={{ "--c": col }}>
+      <b>{title}</b>
+      <span>{body}</span>
+    </div>
+  );
+  return (
+    <Fig caption="Then be sure: take your α, work out cos α and sin α, and check they have the same signs as Q₁₁ and Q₁₂ (cos β is positive, so it can't flip them). Both match and you're right.">
+      <div className="panel rules">
+        <div className="rule-start">Work out tan⁻¹(Q₁₂ / Q₁₁) on the calculator. Then look at Q₁₁:</div>
+        <div className="rule-row">
+          {box(T.axis[1], "Q₁₁ > 0", "Keep the calculator's answer. If it's negative, add 360° to get 0 to 360°.")}
+          {box(T.axis[0], "Q₁₁ < 0", "Add 180°. The real α is on the other side of the circle.")}
+          {box(T.rep.sar, "Q₁₁ = 0", "Can't divide. α is 90° if Q₁₂ > 0, or 270° if Q₁₂ < 0.")}
+        </div>
+        <div className="rule-end">
+          Or skip all of this: atan2(Q₁₂, Q₁₁) on a calculator or in MATLAB/Python looks at both signs and gives the right quadrant straight away.
+        </div>
       </div>
     </Fig>
   );
@@ -209,11 +282,14 @@ export default function Ch3() {
       <h2>From [Q] back to angles</h2>
       <p>Three entries are enough, because each one isolates a single angle:</p>
       <TeX block>{String.raw`\beta = \sin^{-1}(-Q_{13}) \qquad \alpha = \tan^{-1}\!\frac{Q_{12}}{Q_{11}} \qquad \gamma = \tan^{-1}\!\frac{Q_{23}}{Q_{33}}`}</TeX>
-      <BackOut />
+      <AngleHunt />
       <p><Link className="link" to="/tutorial/the-math#q-to-angles">Why these entries? See the cancelling →</Link></p>
 
       <h2>Why tan⁻¹ can be 180° off</h2>
       <Quadrant />
+      <h2>How to know, and how to fix it</h2>
+      <p>You only need the sign of the bottom of the fraction. Same rule for γ with Q₃₃ on the bottom.</p>
+      <QuadrantRules />
       <Ask q="Which matrix goes on the right?" tone="euler">
         <p>
           The first rotation. In <M>[Q] = R</M><sub>1</sub>(<M>γ</M>) <M>R</M><sub>2</sub>(<M>β</M>) <M>R</M><sub>3</sub>(<M>α</M>),

@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { useTheme } from "../../lib/theme.js";
 import { canonicalQuat, dcmToQuat, M1, M2, M3 } from "../../lib/attitude.js";
 import { EAToQ, quatToQ } from "../../lib/course.js";
-import { Fig, M, Mat, Scene, Ask, TeX } from "./kit.jsx";
+import { Fig, M, Mat, Scene, Ask, TeX, MathFlow } from "./kit.jsx";
 
 const serif = { fontFamily: "Times New Roman, serif", fontStyle: "italic", fontWeight: 700 };
 const sans = { fontFamily: "var(--sans)" };
@@ -112,6 +112,72 @@ function Cosines() {
   );
 }
 
+/* ---------- where R3's entries come from ---------- */
+
+const R3_STEPS = [
+  {
+    tex: String.raw`\begin{aligned} \hat x' &= \htmlClass{m-a}{\cos\phi}\,\hat x + \htmlClass{m-b}{\sin\phi}\,\hat y + 0\,\hat z \\ \hat y' &= \htmlClass{m-b}{-\sin\phi}\,\hat x + \htmlClass{m-a}{\cos\phi}\,\hat y + 0\,\hat z \\ \hat z' &= 0\,\hat x + 0\,\hat y + \htmlClass{m-c}{1}\,\hat z \end{aligned}`,
+  },
+  {
+    rule: "Each new axis becomes one row (x′, y′, z′). x′ casts cos φ on x and sin φ on y; y′ leans back toward −x, so it casts −sin φ there; z′ = z.",
+    marks: ["a", "b", "c"],
+    tex: String.raw`[R_3(\phi)] = \begin{bmatrix} \htmlClass{m-a}{\cos\phi} & \htmlClass{m-b}{\sin\phi} & 0 \\ \htmlClass{m-b}{-\sin\phi} & \htmlClass{m-a}{\cos\phi} & 0 \\ 0 & 0 & \htmlClass{m-c}{1} \end{bmatrix}`,
+  },
+];
+
+/* ---------- star tracker: body to inertial with [Q]ᵀ ---------- */
+
+function StarTracker() {
+  const T = useTheme();
+  const stars = [[60, 40, 1.6], [120, 90, 1], [210, 30, 1.3], [300, 70, 1], [380, 25, 1.8], [470, 60, 1.1], [540, 30, 1], [90, 150, 1], [500, 140, 1.4], [430, 110, 1]];
+  const star = [330, 52];
+  const sc = [150, 210];
+  return (
+    <Fig caption="The tracker sees the star in its own (body) frame. Multiply by [Q]ᵀ and you get the same direction in the inertial frame, where the catalogue can check it.">
+      <div className="panel">
+        <svg viewBox="0 0 600 300" role="img" aria-label="A spacecraft star tracker looking at a star, with the star's direction written in body coordinates and in inertial coordinates">
+          <rect x="0" y="0" width="600" height="300" rx="14" fill={T.mode === "dark" ? "#0a1124" : "#1b2340"} />
+          {stars.map(([x, y, r], i) => <circle key={i} cx={x} cy={y} r={r * 1.6} fill="#e8eeff" opacity=".8" />)}
+          {/* the star being tracked */}
+          <circle cx={star[0]} cy={star[1]} r="14" fill="#ffd45e" opacity=".25" />
+          <path d={`M${star[0]} ${star[1] - 9}L${star[0] + 3} ${star[1] - 3}L${star[0] + 9} ${star[1]}L${star[0] + 3} ${star[1] + 3}L${star[0]} ${star[1] + 9}L${star[0] - 3} ${star[1] + 3}L${star[0] - 9} ${star[1]}L${star[0] - 3} ${star[1] - 3}Z`} fill="#ffe27a" />
+          {/* field of view */}
+          <path d={`M${sc[0] + 26} ${sc[1] - 24} L${star[0] - 70} ${star[1] - 20} L${star[0] + 30} ${star[1] + 60} Z`} fill="#ffe27a" opacity=".08" />
+          <line x1={sc[0] + 26} y1={sc[1] - 24} x2={star[0]} y2={star[1]} stroke="#ffe27a" strokeWidth="2.5" strokeDasharray="6 5" />
+          {/* spacecraft, tilted, with its body axes */}
+          <g transform={`translate(${sc[0]} ${sc[1]}) rotate(-20)`}>
+            <rect x="-62" y="-9" width="38" height="18" rx="2" fill="#2852a8" />
+            <rect x="24" y="-9" width="38" height="18" rx="2" fill="#2852a8" />
+            <rect x="-22" y="-22" width="44" height="44" rx="5" fill="#d8a23a" />
+            <rect x="12" y="-34" width="14" height="16" rx="3" fill="#c9d2e3" />
+            <line x1="0" y1="0" x2="80" y2="0" stroke={T.axis[0]} strokeWidth="3.5" strokeLinecap="round" />
+            <line x1="0" y1="0" x2="0" y2="-80" stroke={T.axis[2]} strokeWidth="3.5" strokeLinecap="round" />
+            <text x="86" y="6" fill={T.axis[0]} fontSize="18" style={serif}>x<tspan fontSize="11" dy="4" style={{ fontStyle: "normal" }}>B</tspan></text>
+            <text x="-6" y="-88" fill={T.axis[2]} fontSize="18" style={serif}>z<tspan fontSize="11" dy="4" style={{ fontStyle: "normal" }}>B</tspan></text>
+          </g>
+          <text x={sc[0] - 10} y={sc[1] + 60} fill="#c9d2e3" fontSize="13" style={sans}>star tracker on the +z face</text>
+          {/* the two descriptions */}
+          <g style={sans}>
+            <rect x="372" y="150" width="210" height="58" rx="12" fill="#ffffff" opacity=".95" />
+            <text x="386" y="172" fill="#1b2133" fontSize="13" fontWeight="700">Tracker measures (body)</text>
+            <text x="386" y="194" fill="#1b2133" fontSize="14" style={{ fontFamily: "var(--mono)" }}>s|B = (0.31, 0.12, 0.94)</text>
+            <rect x="372" y="232" width="210" height="58" rx="12" fill="#ffd45e" />
+            <text x="386" y="254" fill="#1b2133" fontSize="13" fontWeight="700">Catalogue lists (inertial)</text>
+            <text x="386" y="276" fill="#1b2133" fontSize="14" style={{ fontFamily: "var(--mono)" }}>s|I = [Q]ᵀ s|B</text>
+            <path d="M350 180 C 330 200, 330 240, 366 258" fill="none" stroke="#ffd45e" strokeWidth="2.5" />
+            <polygon points="0,-6 11,0 0,6" fill="#ffd45e" transform="translate(366 258) rotate(30)" />
+            <text x="300" y="232" fill="#ffd45e" fontSize="15" fontWeight="800">× [Q]ᵀ</text>
+          </g>
+        </svg>
+        <div className="teaser">
+          <span className="chip" style={{ "--c": "var(--primary)" }}>Coming soon</span>
+          <span><b>Chapter 8: Star trackers.</b> From pixels on the sensor to a full attitude, the way a real tracker does it.</span>
+        </div>
+      </div>
+    </Fig>
+  );
+}
+
 /* ---------- 3. the same thing, live ---------- */
 
 const START = canonicalQuat(dcmToQuat(EAToQ(30, 20, 10, [3, 2, 1])));
@@ -120,6 +186,7 @@ function RowsLive() {
   const T = useTheme();
   const [quat, setQuat] = useState(START);
   const [row, setRow] = useState(0);
+  const [craft, setCraft] = useState("ghost");
   const onDrag = useCallback((dq) => {
     setQuat((p) => {
       const n = dq.clone().multiply(new THREE.Quaternion(p[1], p[2], p[3], p[0])).normalize();
@@ -130,7 +197,15 @@ function RowsLive() {
   const projections = useMemo(() => (row === null ? undefined : [{ vec: Q[row], frame: "inertial" }]), [row, Q]);
   return (
     <Fig caption="Tap a row. The matching body axis lights up and drops its three shadows onto X, Y and Z. The badges are the numbers in that row. Drag the spacecraft and watch them change together.">
-      <Scene quat={quat} onDrag={onDrag} highlight={row} projections={projections} height={400} />
+      <Scene quat={quat} onDrag={onDrag} highlight={row} projections={projections} craft={craft} height={400}>
+        <div className="scene-ui" style={{ right: 12, top: 12 }}>
+          <span className="seg craft-seg" role="group" aria-label="Spacecraft">
+            {[["solid", "Solid"], ["ghost", "See-through"], ["hidden", "Hidden"]].map(([k, l]) => (
+              <button key={k} type="button" aria-pressed={craft === k} onClick={() => setCraft(k)}>{l}</button>
+            ))}
+          </span>
+        </div>
+      </Scene>
       <div className="panel" style={{ marginTop: 10, display: "grid", gap: 6 }}>
         <div className="seg-row head" aria-hidden="true">
           <span /> {["X", "Y", "Z"].map((n) => <span key={n} className="faint tiny" style={{ textAlign: "right" }}>along <span className="m">{n}</span></span>)}
@@ -223,10 +298,10 @@ function Elementary() {
             <text x={pt(1.18, 0)[0]} y={C0[1] + 7} fill={T.axis[h]} fontSize="20" style={serif}>{NAME[h]}</text>
             <text x={C0[0] + 8} y={pt(0, 1.13)[1]} fill={T.axis[v]} fontSize="20" style={serif}>{NAME[v]}</text>
             {/* the right triangle under the new h axis */}
-            <line x1={C0[0]} y1={C0[1]} x2={hFoot[0]} y2={C0[1]} stroke={T.axis[h]} strokeWidth="8" strokeLinecap="round" opacity=".55" />
-            <line x1={hFoot[0]} y1={C0[1]} x2={hp[0]} y2={hp[1]} stroke={T.axis[v]} strokeWidth="8" strokeLinecap="round" opacity=".55" />
-            <text x={(C0[0] + hFoot[0]) / 2} y={C0[1] + (s >= 0 ? 26 : -14)} textAnchor="middle" fill={T.text} fontSize="14" style={{ ...sans, fontWeight: 700 }}>cos φ</text>
-            <text x={hFoot[0] + (c >= 0 ? 10 : -10)} y={(C0[1] + hp[1]) / 2 + 5} textAnchor={c >= 0 ? "start" : "end"} fill={T.text} fontSize="14" style={{ ...sans, fontWeight: 700 }}>sin φ</text>
+            <line x1={C0[0]} y1={C0[1]} x2={hFoot[0]} y2={C0[1]} stroke={T.rep.dcm} strokeWidth="8" strokeLinecap="round" opacity=".8" />
+            <line x1={hFoot[0]} y1={C0[1]} x2={hp[0]} y2={hp[1]} stroke={T.rep.quat} strokeWidth="8" strokeLinecap="round" opacity=".8" />
+            <text x={(C0[0] + hFoot[0]) / 2} y={C0[1] + (s >= 0 ? 26 : -14)} textAnchor="middle" fill={T.rep.dcm} fontSize="15" style={{ ...sans, fontWeight: 800 }}>cos φ</text>
+            <text x={hFoot[0] + (c >= 0 ? 10 : -10)} y={(C0[1] + hp[1]) / 2 + 5} textAnchor={c >= 0 ? "start" : "end"} fill={T.rep.quat} fontSize="15" style={{ ...sans, fontWeight: 800 }}>sin φ</text>
             {/* rotated axes */}
             <line x1={C0[0]} y1={C0[1]} x2={hp[0]} y2={hp[1]} stroke={T.axis[h]} strokeWidth="4.5" strokeLinecap="round" />
             <line x1={C0[0]} y1={C0[1]} x2={vp[0]} y2={vp[1]} stroke={T.axis[v]} strokeWidth="4.5" strokeLinecap="round" />
@@ -303,6 +378,23 @@ export default function Ch2() {
         cycle <M>z → x</M>.
       </p>
 
+      <h2>Where the numbers in R₁, R₂ and R₃ come from</h2>
+      <p>
+        You don&apos;t have to memorise them. Use the rule from the top of the page: each row is a new axis written in
+        the old frame. Take <M>R</M><sub>3</sub>, a turn of <M>φ</M> about <M>z</M>, and read the shadows off the picture above.
+        Hover the grey notes between the boxes to see which pieces they mean.
+      </p>
+      <MathFlow tone="dcm" steps={R3_STEPS} />
+      <p>The same three moves give the other two. Only the pair of axes that turns changes:</p>
+      <TeX block>{String.raw`[R_1(\phi)] = \begin{bmatrix}1&0&0\\0&\cos\phi&\sin\phi\\0&-\sin\phi&\cos\phi\end{bmatrix} \qquad [R_2(\phi)] = \begin{bmatrix}\cos\phi&0&-\sin\phi\\0&1&0\\\sin\phi&0&\cos\phi\end{bmatrix}`}</TeX>
+      <Ask q="A quick way to write any of them" tone="dcm">
+        <p>
+          Put a 1 where the turning axis meets itself. Then take the other two axes in the cyclic order
+          x → y → z → x (so y, z for R₁; z, x for R₂; x, y for R₃). The first one gets <M>[cos, sin]</M>, the
+          second gets <M>[−sin, cos]</M>. For R₂ that puts the minus sign above the diagonal.
+        </p>
+      </Ask>
+
       <h2>Going back is free</h2>
       <p>
         Because the rows are perpendicular unit vectors, <M>[Q][Q]</M><sup>T</sup> is the identity. So the
@@ -310,9 +402,11 @@ export default function Ch2() {
       </p>
       <TeX block>{String.raw`[Q]^{-1} = [Q]^T \qquad\Longrightarrow\qquad \bar v\,|_1 = [Q]^T\,\bar v\,|_2`}</TeX>
       <p>
-        Say a star tracker measures a star direction in body coordinates. <M>[Q]</M><sup>T</sup> turns it straight
-        back into inertial coordinates, no matrix inversion needed.
+        Here&apos;s where that matters. A star tracker is a camera bolted to the spacecraft, so it measures a star&apos;s
+        direction in body coordinates. The star catalogue lists the same star in inertial coordinates.
+        <M>[Q]</M><sup>T</sup> moves you from one to the other with no matrix inversion.
       </p>
+      <StarTracker />
 
       <Ask q="Rows or columns?" tone="dcm">
         <p>
