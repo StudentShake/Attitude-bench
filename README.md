@@ -8,7 +8,7 @@ Spin a spacecraft and watch its attitude written four ways at once: the directio
 
 ## Notation
 
-Follows Prof. Lovell's slides and Curtis.
+Follows the AE 426 course notation.
 
 | | |
 |---|---|

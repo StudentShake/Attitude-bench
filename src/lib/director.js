@@ -26,7 +26,8 @@ export function eulerFrame(seq, angles, t) {
   const part = target.map((v, k) => v * s[k]);
   const quat = quatOfEA(part[0], part[1], part[2], seq);
 
-  const k = Math.min(2, Math.floor(Math.max(0, t)));
+  // A step owns (k, k+1], so pausing at the end of a step still shows that step.
+  const k = t <= 0 ? 0 : Math.min(2, Math.ceil(t - 1e-9) - 1);
   const done = t >= 3 - 1e-9;
   // the frame the current step starts from: the previous steps, fully applied
   const before = [0, 1, 2].map((j) => (j < k ? target[j] : 0));
@@ -38,6 +39,7 @@ export function eulerFrame(seq, angles, t) {
     axis: rotateByXYZW(m, E[a]),
     arcFrom: rotateByXYZW(m, E[(a + 1) % 3]),
     angle: part[k] * RAD,
+    label: k === 0 ? { letter: "XYZ"[a], sub: "" } : { letter: "xyz"[a], sub: String(k) },
   };
   const ghosts = !done && k >= 1 ? [{ quat: prevQuat, mark: String(k) }] : [];
   return { quat, step: done ? 3 : k, spin, ghosts, part };

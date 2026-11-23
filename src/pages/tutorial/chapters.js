@@ -8,8 +8,9 @@ export const CHAPTERS = [
   { n: 4, slug: "single-axis-rotation", title: "Single-axis rotation", blurb: "One turn about one axis", color: "sar", ready: true },
   { n: 5, slug: "quaternions", title: "Quaternions", blurb: "Half angles, four numbers", color: "quat", ready: true },
   { n: 6, slug: "converting", title: "Converting between them", blurb: "EA → DCM → SAR → q and back", color: "primary", ready: true },
-  { n: 7, slug: "attitude-determination", title: "Attitude determination", blurb: "Measured vectors to [Q]", color: "faint", ready: false },
-  { n: 8, slug: "star-trackers", title: "Star trackers", blurb: "Pixels to RA, Dec and roll", color: "faint", ready: false },
+  { n: 7, slug: "the-math", title: "The math, step by step", blurb: "Where every formula comes from", color: "dcm", ready: true },
+  { n: 8, slug: "attitude-determination", title: "Attitude determination", blurb: "Measured vectors to [Q]", color: "faint", ready: false },
+  { n: 9, slug: "star-trackers", title: "Star trackers", blurb: "Pixels to RA, Dec and roll", color: "faint", ready: false },
 ];
 
 export const chapterBySlug = (slug) => CHAPTERS.find((c) => c.slug === slug) || null;

@@ -47,7 +47,7 @@ export function Page({ children }) {
       <SiteNav />
       <main style={{ flex: 1, minWidth: 0 }}>{children}</main>
       <footer className="wrap faint tiny" style={{ padding: "28px 20px 34px" }}>
-        Built for AE 426 at Embry-Riddle. Notation follows Prof. Lovell&apos;s slides and Curtis.
+        Built for AE 426 at Embry-Riddle, in the course&apos;s notation.
       </footer>
     </div>
   );

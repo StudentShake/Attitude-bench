@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import * as THREE from "three";
 import { Page } from "../components/SiteChrome.jsx";
 import Viewport from "../components/Viewport.jsx";
-import { Arrow } from "../components/Icons.jsx";
+import { Arrow, Play, Pause } from "../components/Icons.jsx";
 import { DcmGlyph, EulerGlyph, SarGlyph, QuatGlyph } from "../components/Glyphs.jsx";
 
 const REP_GLYPH = { dcm: DcmGlyph, euler: EulerGlyph, sar: SarGlyph, quat: QuatGlyph };
@@ -13,39 +13,46 @@ import { EAToQ, quatToQ, QToEA, QToSAR, toCourseQuat } from "../lib/course.js";
 
 const f = (v, p = 2) => { const s = v.toFixed(p); return /^-0\.?0*$/.test(s) ? s.slice(1) : s; };
 
-/** A slow, lazy tumble so the hero is never still. Stops the moment you grab it. */
+const reduce = () => {
+  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+};
+
+/**
+ * A slow tumble about an axis that wanders over time. It integrates from
+ * wherever the spacecraft is, so pausing, dragging and resuming never jumps.
+ */
 function useTumble() {
   const [quat, setQuat] = useState(() => canonicalQuat(dcmToQuat(EAToQ(30, 20, 10, [3, 2, 1]))));
-  const [held, setHeld] = useState(false);
-  const t0 = useRef(0);
+  const [spinning, setSpinning] = useState(() => !reduce());
   useEffect(() => {
-    if (held) return;
-    let reduce = false;
-    try { reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { /* */ }
-    if (reduce) return;
+    if (!spinning) return;
     let raf, last = 0;
+    const dq = new THREE.Quaternion(), axis = new THREE.Vector3();
     const tick = (now) => {
       raf = requestAnimationFrame(tick);
-      if (now - last < 33) return; // ~30 fps is plenty for a drift
+      if (!last) { last = now; return; }
+      const dt = (now - last) / 1000;
+      if (dt < 0.033) return; // ~30 fps is plenty for a drift
       last = now;
-      if (!t0.current) t0.current = now;
-      const t = (now - t0.current) / 1000;
-      const a = 30 + 50 * Math.sin(t * 0.21);
-      const b = 20 + 35 * Math.sin(t * 0.17 + 1.2);
-      const g = 10 + 70 * Math.sin(t * 0.13 + 0.4);
-      setQuat(canonicalQuat(dcmToQuat(EAToQ(a, b, g, [3, 2, 1]))));
+      const t = now / 1000;
+      axis.set(Math.sin(t * 0.23), Math.cos(t * 0.17 + 1), 0.6 + 0.4 * Math.sin(t * 0.11)).normalize();
+      dq.setFromAxisAngle(axis, 0.42 * Math.min(dt, 0.1));
+      setQuat((p) => {
+        const n = dq.clone().multiply(new THREE.Quaternion(p[1], p[2], p[3], p[0])).normalize();
+        return canonicalQuat([n.w, n.x, n.y, n.z]);
+      });
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [held]);
+  }, [spinning]);
   const onDrag = useCallback((dq) => {
-    setHeld(true);
+    setSpinning(false);
     setQuat((p) => {
       const n = dq.clone().multiply(new THREE.Quaternion(p[1], p[2], p[3], p[0])).normalize();
       return canonicalQuat([n.w, n.x, n.y, n.z]);
     });
   }, []);
-  return { quat, onDrag };
+  return { quat, onDrag, spinning, setSpinning };
 }
 
 function LiveChips({ quat }) {
@@ -79,7 +86,7 @@ const FOUR = [
 
 export default function Landing() {
   const T = useTheme();
-  const { quat, onDrag } = useTumble();
+  const { quat, onDrag, spinning, setSpinning } = useTumble();
 
   return (
     <Page>
@@ -100,8 +107,13 @@ export default function Landing() {
         </div>
         <div className="hero-stage rise" style={{ animationDelay: ".08s" }}>
           <div className="scene" style={{ height: "100%" }}>
-            <Viewport quat={quat} onDrag={onDrag} gizmo={false} sar={null} autoSpin={0.06}
-              view={{ az: 0.7, el: 0.36, dist: 9 }} />
+            <Viewport quat={quat} onDrag={onDrag} gizmo={false} sar={null} autoSpin={spinning ? 0.06 : 0}
+              view={{ az: 0.7, el: 0.36, dist: 9.6 }} />
+            <div className="scene-ui" style={{ left: 12, top: 12 }}>
+              <button type="button" className="btn sm" onClick={() => setSpinning((v) => !v)} aria-pressed={spinning}>
+                {spinning ? <><Pause size={15} /> Pause the spin</> : <><Play size={15} /> Resume the spin</>}
+              </button>
+            </div>
             <LiveChips quat={quat} />
           </div>
         </div>

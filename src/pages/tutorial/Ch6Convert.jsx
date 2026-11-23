@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
 import { EAToQ, QToEA, QToSAR, SARToQuat, quatToSAR, SARToQ } from "../../lib/course.js";
 import NumField from "../../components/NumField.jsx";
-import { Fig, M, Mat, Ask } from "./kit.jsx";
+import { Fig, M, Mat, Ask, TeX } from "./kit.jsx";
 
 function Chain() {
   const T = useTheme();
@@ -14,8 +14,8 @@ function Chain() {
     { k: "quat", x: 730, label: "QUAT", sub: "q" },
   ];
   const links = [
-    ["multiply the R's", "sin⁻¹, tan⁻¹"],
-    ["slide 12 matrix", "trace, differences"],
+    ["multiply the R's", "sin⁻¹, atan2"],
+    ["SAR matrix", "trace, differences"],
     ["half angle", "2 cos⁻¹ q₄"],
   ];
   return (
@@ -62,44 +62,63 @@ function Walkthrough() {
     const sar = QToSAR(Q);
     const q = sar.u ? SARToQuat(sar.u, sar.theta) : [0, 0, 0, 1];
     const sar2 = quatToSAR(q);
-    const Q2 = sar.u ? SARToQ(sar2.u, sar2.theta) : Q;
+    const Q2 = sar2.u ? SARToQ(sar2.u, sar2.theta) : Q;
     const ea = QToEA(Q2, [3, 2, 1]);
     return { Q, sar, q, sar2, Q2, ea };
   }, [a]);
   const G = ["α", "β", "γ"];
-  const step = (n, rep, title, body) => (
-    <div className="wstep" style={{ "--c": T.rep[rep] }}>
-      <div className="wstep-n">{n}</div>
-      <div style={{ minWidth: 0 }}><h3>{title}</h3><div className="res">{body}</div></div>
+  const close = (x, y) => Math.abs(x - y) < 1e-6;
+  const backOk = [0, 1, 2].every((k) => close([r.ea.alpha, r.ea.beta, r.ea.gamma][k], [((a[0] % 360) + 360) % 360, a[1], ((a[2] % 360) + 360) % 360][k]));
+
+  const node = (rep, title, sym, body, check) => (
+    <div className="flow-node" style={{ "--c": T.rep[rep] }}>
+      <div className="flow-head">
+        <span className="rep-badge">{sym}</span>
+        <b>{title}</b>
+        {check && <span className="chip" style={{ "--c": T.axis[1], marginLeft: "auto" }}>✓ matches</span>}
+      </div>
+      <div className="flow-body">{body}</div>
+    </div>
+  );
+  const link = (tex, note) => (
+    <div className="flow-link">
+      <span className="flow-arrow" aria-hidden="true" />
+      <div className="flow-note"><TeX>{tex}</TeX>{note && <span className="tiny dim"> {note}</span>}</div>
     </div>
   );
   return (
-    <>
-      <div className="panel" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-        <div className="small" style={{ fontWeight: 650, flex: "1 1 100%" }}>Your 3-2-1 angles</div>
-        {[0, 1, 2].map((k) => (
-          <label key={k} style={{ flex: "1 1 90px" }}>
-            <div className="lbl" style={{ color: T.axis[2 - k] }}><span className="m">{G[k]}</span></div>
-            <NumField value={String(a[k])} suffix="°" color={T.axis[2 - k]} label={G[k]}
-              onCommit={(v) => { const n = a.slice(); n[k] = v; setA(n); }} />
-          </label>
-        ))}
-        <button type="button" className="btn sm" onClick={() => setA([30, 20, 10])}>Slide example</button>
-      </div>
-      <div className="steps-v">
-        {step(1, "dcm", "EA → DCM", <Mat rows={r.Q} digits={6} size={13.5} />)}
-        {step(2, "sar", "DCM → SAR", r.sar.u
-          ? <>û = ({r.sar.u.map((v) => f(v)).join(", ")})<br />θ = {f(r.sar.theta, 4)}°</>
-          : <>θ = 0°, so there&apos;s no axis. Pick nonzero angles to keep going.</>)}
-        {step(3, "quat", "SAR → QUAT", <>q = [ {r.q.map((v) => f(v)).join("  ")} ]</>)}
-        {step(4, "sar", "QUAT → SAR (check)", r.sar2.u
-          ? <>û = ({r.sar2.u.map((v) => f(v)).join(", ")}), θ = {f(r.sar2.theta, 4)}°</>
-          : <>θ = 0°</>)}
-        {step(5, "dcm", "SAR → DCM (check)", <Mat rows={r.Q2} digits={6} size={13.5} />)}
-        {step(6, "euler", "DCM → EA (back where you started)",
-          <>α = {f(r.ea.alpha, 4)}°, β = {f(r.ea.beta, 4)}°, γ = {f(r.ea.gamma, 4)}°</>)}
-      </div>
-    </>
+    <div className="flow">
+      <div className="flow-rail" aria-hidden="true"><span>same angles</span></div>
+      {node("euler", "Start: Euler angles (3-2-1)", "α β γ", (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          {[0, 1, 2].map((k) => (
+            <label key={k} style={{ flex: "1 1 70px" }}>
+              <div className="lbl" style={{ color: T.axis[2 - k] }}><span className="m">{G[k]}</span></div>
+              <NumField value={String(a[k])} suffix="°" color={T.axis[2 - k]} label={G[k]}
+                onCommit={(v) => { const n = a.slice(); n[k] = v; setA(n); }} />
+            </label>
+          ))}
+          <button type="button" className="btn sm" onClick={() => setA([30, 20, 10])}>30°, 20°, 10°</button>
+        </div>
+      ))}
+      {link(String.raw`[Q] = R_1(\gamma)\,R_2(\beta)\,R_3(\alpha)`)}
+      {node("dcm", "DCM", "[Q]", <Mat rows={r.Q} digits={6} size={13.5} />)}
+      {link(String.raw`\theta = \cos^{-1}\tfrac{\mathrm{tr}[Q]-1}{2},\ \ \hat u = \tfrac{1}{2\sin\theta}(Q_{23}-Q_{32},\ \dots)`)}
+      {node("sar", "Single-axis rotation", "û, θ", r.sar.u
+        ? <span className="num">û = ({r.sar.u.map((v) => f(v)).join(", ")})<br />θ = {f(r.sar.theta, 4)}°</span>
+        : <span className="dim">θ = 0°, so there&apos;s no axis. Pick nonzero angles.</span>)}
+      {link(String.raw`\bar{\bar q} = [\,\hat u\sin\tfrac{\theta}{2}\ ;\ \cos\tfrac{\theta}{2}\,]`)}
+      {node("quat", "Quaternion", "q", <span className="num">[ {r.q.map((v) => f(v)).join("  ")} ]</span>)}
+      {link(String.raw`\theta = 2\cos^{-1}q_4,\ \ \hat u = \bar q / \sin\tfrac{\theta}{2}`, "now go back")}
+      {node("sar", "SAR again", "û, θ", r.sar2.u
+        ? <span className="num">û = ({r.sar2.u.map((v) => f(v)).join(", ")}), θ = {f(r.sar2.theta, 4)}°</span>
+        : <span className="num">θ = 0°</span>, !!r.sar.u)}
+      {link(String.raw`\text{plug } \hat u,\ \theta \text{ into the SAR matrix}`)}
+      {node("dcm", "DCM again", "[Q]", <Mat rows={r.Q2} digits={6} size={13.5} />, true)}
+      {link(String.raw`\beta = \sin^{-1}(-Q_{13}),\ \ \alpha,\gamma \text{ from atan2}`)}
+      {node("euler", "Back where you started", "α β γ",
+        <span className="num">α = {f(r.ea.alpha, 4)}°, β = {f(r.ea.beta, 4)}°, γ = {f(r.ea.gamma, 4)}°</span>, backOk)}
+    </div>
   );
 }
 
@@ -112,11 +131,11 @@ export default function Ch6() {
       </p>
       <Chain />
 
-      <h2>The 15 Jul example, start to finish</h2>
+      <h2>One example, all the way around</h2>
       <p>
         A spacecraft finds its attitude as <M>α</M> = 30°, <M>β</M> = 20°, <M>γ</M> = 10° in a 3-2-1 sequence.
-        Find the DCM, the SAR and the quaternion. Then go back the other way to check. Change the angles and
-        every step redoes itself.
+        Find the DCM, the SAR and the quaternion, then go back the other way to check. Each box feeds the next.
+        Change the angles and the whole chain redoes itself.
       </p>
       <Walkthrough />
 

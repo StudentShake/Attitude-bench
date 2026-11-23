@@ -46,42 +46,103 @@ function FrameDemo() {
   );
 }
 
+/* ECI, drawn the way orbital mechanics texts usually do: equatorial plane,
+   ecliptic tilted 23.4° from it, X along the line where the two meet. */
 function ECI() {
   const T = useTheme();
+  const C = [360, 214], r = 150, EPS = 23.4 * Math.PI / 180;
+  // oblique projection: X toward the viewer (lower left), Y right, Z up
+  const P = (x, y, z) => [C[0] - 0.6 * x * r + 1.0 * y * r, C[1] + 0.38 * x * r - 1.0 * z * r + 0.02 * y * r];
+  const ring = (f, from, to, n = 60) => Array.from({ length: n + 1 }, (_, i) => f(from + ((to - from) * i) / n));
+  const path = (pts) => pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+  const equ = (t) => P(Math.cos(t), Math.sin(t), 0);
+  const ecl = (t) => P(Math.cos(t), Math.sin(t) * Math.cos(EPS), Math.sin(t) * Math.sin(EPS));
+  // depth = x (toward viewer). Back half: x < 0, i.e. t in (90°, 270°)
+  const back = (f) => path(ring(f, Math.PI / 2, 1.5 * Math.PI));
+  const front = (f) => path(ring(f, -Math.PI / 2, Math.PI / 2));
+  const full = (f) => path(ring(f, 0, 2 * Math.PI, 120)) + " Z";
+  const O = P(0, 0, 0);
+  const tipX = P(1.62, 0, 0), tipY = P(0, 1.42, 0), tipZ = P(0, 0, 1.22);
+  const surfX = P(0.47, 0, 0), surfY = P(0, 0.47, 0), surfZ = P(0, 0, 0.47);
+  const sun = P(2.25, 0, 0);
+  const arrow = (from, to, col) => {
+    const ang = Math.atan2(to[1] - from[1], to[0] - from[0]) * 180 / Math.PI;
+    return (
+      <g>
+        <line x1={from[0]} y1={from[1]} x2={to[0]} y2={to[1]} stroke={col} strokeWidth="3.5" strokeLinecap="round" />
+        <polygon points="0,-6.5 14,0 0,6.5" fill={col} transform={`translate(${to[0]} ${to[1]}) rotate(${ang})`} />
+      </g>
+    );
+  };
+  const inner = (to, col) => <line x1={O[0]} y1={O[1]} x2={to[0]} y2={to[1]} stroke={col} strokeWidth="2" strokeDasharray="4 4" opacity=".75" />;
+  const tiltA = ecl(Math.PI / 2), tiltB = equ(Math.PI / 2);
+  const font = { fontFamily: "var(--sans)", fontSize: 14 };
+  const axisFont = { fontFamily: "Times New Roman, serif", fontStyle: "italic", fontWeight: 700, fontSize: 26 };
   return (
-    <Fig caption="Earth-centred inertial (ECI). X points at the vernal equinox, Z at the north pole, Y finishes the right-handed set. J2000 freezes the equinox direction at noon UTC on 1 Jan 2000.">
+    <Fig caption="The inertial frame used for Earth orbits. Z is Earth's spin axis. X sits where the equatorial plane meets the ecliptic, pointing at the Sun on the first day of spring. Y is 90° east of X, in the equator. J2000 freezes those directions at noon UTC on 1 Jan 2000.">
       <div className="panel">
-        <svg viewBox="0 0 560 300" role="img" aria-label="Earth with the ECI axes drawn from its centre">
+        <svg viewBox="0 0 680 430" role="img" aria-label="Earth at the centre. The equatorial plane and the ecliptic plane cross along the X axis, which points at the Sun. Y lies in the equatorial plane, Z points to the north pole.">
           <defs>
-            <radialGradient id="earth" cx="40%" cy="35%" r="70%">
-              <stop offset="0%" stopColor="#6fb5ff" /><stop offset="70%" stopColor="#2a6fd1" /><stop offset="100%" stopColor="#1b4b98" />
+            <radialGradient id="earthG" cx="38%" cy="32%" r="72%">
+              <stop offset="0%" stopColor="#7cc0ff" /><stop offset="65%" stopColor="#2a6fd1" /><stop offset="100%" stopColor="#163f8a" />
+            </radialGradient>
+            <radialGradient id="sunG" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#fff6c9" /><stop offset="45%" stopColor="#ffc53d" /><stop offset="100%" stopColor="#ffc53d" stopOpacity="0" />
             </radialGradient>
           </defs>
-          <circle cx="280" cy="160" r="92" fill="url(#earth)" />
-          <path d="M228 120c18-14 40-10 52 4s30 8 40 0M246 190c14 10 34 12 50 2" stroke="#7ee08f" strokeWidth="9" strokeLinecap="round" fill="none" opacity=".55" />
-          <ellipse cx="280" cy="160" rx="150" ry="34" fill="none" stroke={T.faint} strokeWidth="1.5" strokeDasharray="5 5" />
-          <text x="430" y="196" fill={T.faint} fontSize="13" fontFamily="var(--sans)">equatorial plane</text>
-          {/* Z */}
-          <line x1="280" y1="160" x2="280" y2="22" stroke={T.axis[2]} strokeWidth="3" strokeDasharray="7 5" />
-          <circle cx="280" cy="68" r="5" fill="#fff" />
-          <text x="292" y="72" fill={T.dim} fontSize="13" fontFamily="var(--sans)">north pole</text>
-          <text x="288" y="26" fill={T.axis[2]} fontSize="24" fontFamily="Times New Roman" fontStyle="italic" fontWeight="700">Z</text>
-          {/* X */}
-          <line x1="280" y1="160" x2="120" y2="250" stroke={T.axis[0]} strokeWidth="3" strokeDasharray="7 5" />
-          <text x="92" y="270" fill={T.axis[0]} fontSize="24" fontFamily="Times New Roman" fontStyle="italic" fontWeight="700">X</text>
-          <text x="40" y="232" fill={T.dim} fontSize="13" fontFamily="var(--sans)">to the vernal equinox</text>
-          {/* Y */}
-          <line x1="280" y1="160" x2="470" y2="226" stroke={T.axis[1]} strokeWidth="3" strokeDasharray="7 5" />
-          <text x="476" y="244" fill={T.axis[1]} fontSize="24" fontFamily="Times New Roman" fontStyle="italic" fontWeight="700">Y</text>
-          {/* a satellite for scale of the idea, not of the drawing */}
-          <g transform="translate(430 70) rotate(-25)">
-            <rect x="-26" y="-5" width="16" height="10" fill="#2852a8" />
-            <rect x="10" y="-5" width="16" height="10" fill="#2852a8" />
-            <rect x="-9" y="-9" width="18" height="18" rx="2" fill="#d8a23a" />
-            <path d="M0 0L18 -22" stroke={T.axis[0]} strokeWidth="2.5" strokeLinecap="round" />
-            <path d="M0 0L-16 -20" stroke={T.axis[2]} strokeWidth="2.5" strokeLinecap="round" />
-          </g>
-          <text x="462" y="52" fill={T.dim} fontSize="13" fontFamily="var(--sans)">body frame</text>
+
+          {/* planes: fills first, back rims dashed */}
+          <path d={full(ecl)} fill={T.rep.sar} opacity=".10" />
+          <path d={full(equ)} fill={T.axis[2]} opacity=".10" />
+          <path d={back(ecl)} fill="none" stroke={T.rep.sar} strokeWidth="2" strokeDasharray="5 5" opacity=".8" />
+          <path d={back(equ)} fill="none" stroke={T.axis[2]} strokeWidth="2" strokeDasharray="5 5" opacity=".7" />
+
+          {/* Earth */}
+          <circle cx={O[0]} cy={O[1]} r={0.47 * r} fill="url(#earthG)" />
+          <path d={`M${O[0] - 40} ${O[1] - 22}c18 -14 40 -10 52 4s30 8 26 0M${O[0] - 24} ${O[1] + 30}c14 8 30 10 44 0`} stroke="#86e3a0" strokeWidth="8" strokeLinecap="round" fill="none" opacity=".5" />
+          {inner(surfX, T.axis[0])}{inner(surfY, T.axis[1])}{inner(surfZ, T.axis[2])}
+
+          {/* front rims over the Earth */}
+          <path d={front(equ)} fill="none" stroke={T.axis[2]} strokeWidth="2.5" />
+          <path d={front(ecl)} fill="none" stroke={T.rep.sar} strokeWidth="2.5" />
+
+          {/* tilt between the planes */}
+          <line x1={O[0]} y1={O[1]} x2={tiltA[0]} y2={tiltA[1]} stroke={T.rep.sar} strokeWidth="1.5" strokeDasharray="3 4" />
+          {(() => {
+            // arc at the origin between the two planes, drawn out past the Earth
+            const R = 0.86 * r;
+            const aB = Math.atan2(tiltB[1] - O[1], tiltB[0] - O[0]), aA = Math.atan2(tiltA[1] - O[1], tiltA[0] - O[0]);
+            const p1 = [O[0] + R * Math.cos(aB), O[1] + R * Math.sin(aB)], p2 = [O[0] + R * Math.cos(aA), O[1] + R * Math.sin(aA)];
+            const mid = (aA + aB) / 2;
+            return (
+              <g>
+                <path d={`M${p1[0]} ${p1[1]} A ${R} ${R} 0 0 0 ${p2[0]} ${p2[1]}`} fill="none" stroke={T.text} strokeWidth="2" />
+                <text x={O[0] + (R + 14) * Math.cos(mid)} y={O[1] + (R + 14) * Math.sin(mid) + 5} fill={T.text} style={{ ...font, fontWeight: 700 }}>23.4°</text>
+              </g>
+            );
+          })()}
+
+          {/* axes */}
+          {arrow(surfX, tipX, T.axis[0])}
+          {arrow(surfY, tipY, T.axis[1])}
+          {arrow(surfZ, tipZ, T.axis[2])}
+          <line x1={tipX[0]} y1={tipX[1]} x2={sun[0] + 18} y2={sun[1] - 12} stroke={T.axis[0]} strokeWidth="1.5" strokeDasharray="2 5" />
+
+          {/* Sun along +X */}
+          <circle cx={sun[0]} cy={sun[1]} r="30" fill="url(#sunG)" />
+          <circle cx={sun[0]} cy={sun[1]} r="12" fill="#ffd45e" />
+
+          {/* labels, each kept clear of the lines */}
+          <text x={tipZ[0] + 14} y={tipZ[1] + 10} fill={T.axis[2]} style={axisFont}>Z</text>
+          <text x={tipZ[0] + 14} y={tipZ[1] + 32} fill={T.dim} style={font}>north pole, spin axis</text>
+          <text x={tipY[0] - 4} y={tipY[1] - 16} fill={T.axis[1]} style={axisFont}>Y</text>
+          <text x={tipY[0] - 52} y={tipY[1] + 28} fill={T.dim} style={font}>90° east of X</text>
+          <text x={tipX[0] + 16} y={tipX[1] + 22} fill={T.axis[0]} style={axisFont}>X</text>
+          <text x={sun[0] + 38} y={sun[1] + 6} fill={T.dim} style={font}>Sun on the first day of spring</text>
+          <text x={sun[0] + 38} y={sun[1] + 24} fill={T.faint} style={font}>(the vernal equinox direction)</text>
+          <text x={P(-0.2, 1.08, 0)[0] + 8} y={P(-0.2, 1.08, 0)[1] - 34} fill={T.axis[2]} style={{ ...font, fontWeight: 700 }}>equatorial plane</text>
+          <text x={P(0.1, -1.1, 0)[0] - 72} y={P(0.1, -1.1, 0)[1] - 50} fill={T.rep.sar} style={{ ...font, fontWeight: 700 }}>ecliptic</text>
+          <text x={P(0.1, -1.1, 0)[0] - 72} y={P(0.1, -1.1, 0)[1] - 32} fill={T.dim} style={font}>(plane of Earth&apos;s orbit)</text>
         </svg>
       </div>
     </Fig>

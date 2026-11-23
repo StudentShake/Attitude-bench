@@ -141,7 +141,7 @@ export function diagnose(p, answers) {
       const u = ["ux", "uy", "uz"].map(num);
       const absMatch = u.every((x, i) => near(x, Math.abs(p.sar.u[i]), TOL.num));
       const signed = u.every((x, i) => near(x, p.sar.u[i], TOL.num));
-      if (absMatch && !signed) return "Your axis has every component positive. The square-root formula loses signs; divide by 2 sin θ (or sin(θ/2)) instead.";
+      if (absMatch && !signed) return "Every component of your axis came out positive, but some should be negative. Divide by 2 sin θ (or sin(θ/2)) instead of squaring and taking roots, so the signs survive.";
       if (p.type === "quat-sar" && near(num("theta"), p.sar.theta / 2, TOL.deg)) return "θ is twice cos⁻¹(q₄). You found the half angle.";
       return null;
     }

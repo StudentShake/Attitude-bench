@@ -10,7 +10,7 @@ import {
   quatToQ, QToEA, EAToQ, QToSAR, SARToQuat, toCourseQuat, fromCourseQuat, SEQ_NICKNAME, seqName,
 } from "../lib/course.js";
 import { eulerFrame, sarFrame, slerp } from "../lib/director.js";
-import { useTheme } from "../lib/theme.js";
+import { useTheme, REPS } from "../lib/theme.js";
 
 /* ============================================================================
    PLAYGROUND
@@ -51,6 +51,16 @@ function AxisName({ seq, k }) {
 
 const GREEK = ["α", "β", "γ"];
 
+/** A tiny remembered setting (layout, which cards show). */
+function usePref(key, init) {
+  const k = `attitude-bench:${key}`;
+  const [v, setV] = useState(() => {
+    try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : init; } catch { return init; }
+  });
+  useEffect(() => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* fine */ } }, [k, v]);
+  return [v, setV];
+}
+
 /* ---------- URL state, so a link reproduces the attitude ---------- */
 
 function readURL() {
@@ -84,6 +94,9 @@ export default function AttitudeBench() {
   const [seqIdx, setSeqIdx] = useState(init.seqIdx ?? SEQ_321);
   const [highlight, setHighlight] = useState(null);
   const [showInertial, setShowInertial] = useState(true);
+  const [showBody, setShowBody] = useState(true);
+  const [showCards, setShowCards] = usePref("cards", { dcm: true, euler: true, sar: true, quat: true });
+  const [dock, setDock] = usePref("dock", "side");
   const [showSAR, setShowSAR] = useState(true);
   const [hidden, setHidden] = useState({ dcm: false, euler: false, sar: false, quat: false });
   const [flipSign, setFlipSign] = useState(false);
@@ -111,10 +124,11 @@ export default function AttitudeBench() {
     if (!anim || !anim.playing) return;
     let raf;
     const t0 = performance.now() - anim.t * anim.msPerUnit;
+    const stop = anim.stopAt ?? anim.tMax;
     const tick = (now) => {
-      const t = Math.min(anim.tMax, (now - t0) / anim.msPerUnit);
-      const end = t >= anim.tMax;
-      setAnim((a) => (a && a.id === anim.id ? (end && a.kind === "slerp" ? null : { ...a, t, playing: !end }) : a));
+      const t = Math.min(stop, (now - t0) / anim.msPerUnit);
+      const end = t >= stop;
+      setAnim((a) => (a && a.id === anim.id ? (end && a.kind === "slerp" ? null : { ...a, t, playing: !end, stopAt: end ? null : a.stopAt }) : a));
       if (!end) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -212,7 +226,7 @@ export default function AttitudeBench() {
 
   const spin = useMemo(() => {
     if (!frame || !frame.spin) return null;
-    if (sarAnim) return { ...frame.spin, color: T.rep.sar };
+    if (sarAnim) return { ...frame.spin, color: T.rep.sar, label: { letter: "û", sub: "" } };
     return { ...frame.spin, color: T.axis[frame.spin.axisIndex] };
   }, [frame, sarAnim, T]);
 
@@ -221,7 +235,14 @@ export default function AttitudeBench() {
     return { axis: sar.u, angle: (sar.theta * Math.PI) / 180 };
   }, [showSAR, playing, sar]);
 
-  const ghosts = frame && frame.ghosts ? frame.ghosts : [];
+  const ghosts = frame && frame.ghosts ? frame.ghosts : undefined;
+
+  // tap a row of [Q] (or a body axis chip) to see where its three numbers sit
+  const projections = useMemo(
+    () => (highlight === null || playing ? undefined : [{ vec: Q[highlight], frame: "inertial" }]),
+    [highlight, Q, playing],
+  );
+  const toggleAxis = useCallback((i) => setHighlight((h) => (h === i ? null : i)), []);
 
   /* ---------- caption over the scene while a scene plays ---------- */
 
@@ -266,14 +287,35 @@ export default function AttitudeBench() {
         </button>
       </div>
 
-      <div className="pg-grid">
+      <div className="pg-tools">
+        <div className="pg-tool" role="group" aria-label="Which cards to show">
+          <span className="faint small">Cards</span>
+          {REPS.map((r) => (
+            <button key={r.key} type="button" className="toggle" aria-pressed={showCards[r.key]}
+              style={{ "--c": T.rep[r.key] }} onClick={() => setShowCards((c) => ({ ...c, [r.key]: !c[r.key] }))}>
+              <span className="sw" /> <span className="m">{r.symbol}</span>
+            </button>
+          ))}
+        </div>
+        <div className="pg-tool">
+          <span className="faint small">Layout</span>
+          <div className="seg" role="group" aria-label="Where the cards go">
+            {[["side", "Side"], ["below", "Below"], ["scene", "On the scene"]].map(([k, l]) => (
+              <button key={k} type="button" aria-pressed={dock === k} onClick={() => setDock(k)}>{l}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className={`pg-grid dock-${dock}`}>
         {/* ------------------------------ stage ------------------------------ */}
         <div className="pg-stage">
           <div className="scene pg-view">
             <Viewport
-              quat={shown} onDrag={onDrag} highlight={highlight} showInertial={showInertial}
-              sar={sarProp} ghosts={ghosts} spin={spin} onInteract={interact}
+              quat={shown} onDrag={onDrag} highlight={highlight} showInertial={showInertial} showBody={showBody}
+              sar={sarProp} ghosts={ghosts} spin={spin} onInteract={interact} projections={projections}
             />
+            {dock === "scene" && <SceneReadouts show={showCards} Q={Q} ea={ea} sar={sar} qc={qc} seq={seq} T={T} />}
             <div className="scene-ui" style={{ left: 12, top: 12 }}>
               <button type="button" className="btn sm" onClick={() => glideTo(IDENTITY)}
                 title="Line the body frame back up with the inertial frame">
@@ -290,7 +332,10 @@ export default function AttitudeBench() {
           </div>
 
           <div className="legend" style={{ padding: "2px 4px" }}>
-            <span><i className="swatch-line" style={{ "--c": T.axis[0] }} /><i className="swatch-line" style={{ "--c": T.axis[1], marginLeft: -4 }} /><i className="swatch-line" style={{ "--c": T.axis[2], marginLeft: -4 }} /> body frame <span className="m">B</span></span>
+            <button type="button" className="toggle" aria-pressed={showBody} style={{ "--c": T.axis[0] }}
+              onClick={() => setShowBody((v) => !v)}>
+              <i className="swatch-line" style={{ "--c": T.axis[0] }} /><i className="swatch-line" style={{ "--c": T.axis[1], marginLeft: -4 }} /><i className="swatch-line" style={{ "--c": T.axis[2], marginLeft: -4 }} /> body frame <span className="m">B</span>
+            </button>
             <button type="button" className="toggle" aria-pressed={showInertial} style={{ "--c": T.inertial }}
               onClick={() => setShowInertial((v) => !v)}>
               <i className="swatch-line dashed" style={{ "--c": T.inertial }} /> inertial frame <span className="m">XYZ</span>
@@ -299,15 +344,22 @@ export default function AttitudeBench() {
               onClick={() => setShowSAR((v) => !v)}>
               <span className="sw" /> SAR axis and <span className="m">θ</span>
             </button>
-            <span className="faint tiny">Tap an axis in the corner to look down it.</span>
+            <span className="axis-picks" role="group" aria-label="Show where a body axis's numbers come from">
+              {[0, 1, 2].map((i) => (
+                <button key={i} type="button" className="axis-pick" aria-pressed={highlight === i}
+                  style={{ "--c": T.axis[i] }} onClick={() => toggleAxis(i)} title={`Show where the ${"xyz"[i]}_B row of [Q] comes from`}>
+                  <span className="m">{"xyz"[i]}</span><sub>B</sub>
+                </button>
+              ))}
+            </span>
           </div>
         </div>
 
         {/* ------------------------------ cards ------------------------------ */}
-        <div className="pg-cards">
+        {dock !== "scene" && <div className="pg-cards">
 
           {/* DCM */}
-          <RepCard rep="dcm" symbol="[Q]" title="Direction cosine matrix"
+          {showCards.dcm && <RepCard rep="dcm" symbol="[Q]" title="Direction cosine matrix"
             note={<>Maps inertial to body: <span className="m">v</span>|<sub>B</sub> = [Q] <span className="m">v</span>|<sub>I</sub></>}
             hidden={hidden.dcm} onHide={(h) => setHidden((s) => ({ ...s, dcm: h }))}>
             <Spoiler hidden={hidden.dcm} resetKey={resetKey}>
@@ -319,7 +371,7 @@ export default function AttitudeBench() {
                   </div>
                 ))}
                 {[0, 1, 2].map((r) => (
-                  <RowCells key={r} r={r} Q={dcmDraft || Q} T={T} setHighlight={setHighlight}
+                  <RowCells key={r} r={r} Q={dcmDraft || Q} T={T} on={highlight === r} onToggle={() => toggleAxis(r)}
                     onCommit={(c, v) => {
                       const N = (dcmDraft || Q).map((row) => row.slice());
                       N[r][c] = v;
@@ -331,12 +383,12 @@ export default function AttitudeBench() {
             <p className="note">
               {dcmDraft && orthogonalityError(dcmDraft) > 1e-3
                 ? "That's not a rotation matrix yet, so the spacecraft shows the closest one. Keep typing."
-                : "Each row is one body axis written in inertial coordinates. Hover a row to light that axis up."}
+                : "Each row is one body axis written in inertial coordinates. Tap a row's label to see where its three numbers sit on the spacecraft."}
             </p>
-          </RepCard>
+          </RepCard>}
 
           {/* Euler angles */}
-          <RepCard rep="euler" symbol="α β γ" title="Euler angles"
+          {showCards.euler && <RepCard rep="euler" symbol="α β γ" title="Euler angles"
             note={<>Sequence {seqName(seq)}{SEQ_NICKNAME[seqName(seq)] ? ` (${SEQ_NICKNAME[seqName(seq)]})` : ""}</>}
             hidden={hidden.euler} onHide={(h) => setHidden((s) => ({ ...s, euler: h }))}>
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
@@ -386,14 +438,17 @@ export default function AttitudeBench() {
               ) : (
                 <EulerPlayer anim={eulerAnim} frame={frame} T={T}
                   onToggle={() => setAnim((a) => (a.t >= a.tMax ? { ...a, t: 0, playing: true, id: Math.random() } : { ...a, playing: !a.playing }))}
-                  onScrub={(t) => setAnim((a) => ({ ...a, t, playing: false }))}
+                  onScrub={(t) => setAnim((a) => ({ ...a, t, playing: false, stopAt: null }))}
+                  onStep={(j) => setAnim((a) => (reduceMotion()
+                    ? { ...a, t: j + 1, playing: false }
+                    : { ...a, t: j, stopAt: j + 1, playing: true, id: Math.random() }))}
                   onClose={() => setAnim(null)} />
               )}
             </div>
-          </RepCard>
+          </RepCard>}
 
           {/* SAR */}
-          <RepCard rep="sar" symbol="û, θ" title="Single-axis rotation"
+          {showCards.sar && <RepCard rep="sar" symbol="û, θ" title="Single-axis rotation"
             note="One turn of θ about the Euler axis û"
             hidden={hidden.sar} onHide={(h) => setHidden((s) => ({ ...s, sar: h }))}>
             <Spoiler hidden={hidden.sar} resetKey={resetKey}>
@@ -443,10 +498,10 @@ export default function AttitudeBench() {
                 </div>
               )}
             </div>
-          </RepCard>
+          </RepCard>}
 
           {/* Quaternion */}
-          <RepCard rep="quat" symbol="q" title="Quaternion"
+          {showCards.quat && <RepCard rep="quat" symbol="q" title="Quaternion"
             note={<>Scalar last: <span className="m">q</span> = [ <span className="m">û</span> sin(<span className="m">θ</span>/2) ; cos(<span className="m">θ</span>/2) ]</>}
             hidden={hidden.quat} onHide={(h) => setHidden((s) => ({ ...s, quat: h }))}>
             <Spoiler hidden={hidden.quat} resetKey={resetKey}>
@@ -483,8 +538,11 @@ export default function AttitudeBench() {
                 {flipSign ? "Every sign flipped and the spacecraft didn't move. q and −q are the same attitude." : "Try it and watch the spacecraft."}
               </span>
             </div>
-          </RepCard>
-        </div>
+          </RepCard>}
+          {!REPS.some((r) => showCards[r.key]) && (
+            <p className="dim small" style={{ padding: 8 }}>All cards are hidden. Turn one on above.</p>
+          )}
+        </div>}
       </div>
     </div>
   );
@@ -492,17 +550,16 @@ export default function AttitudeBench() {
 
 /* ---------- pieces ---------- */
 
-function RowCells({ r, Q, T, setHighlight, onCommit }) {
+function RowCells({ r, Q, T, on, onToggle, onCommit }) {
   const col = T.axis[r];
   return (
     <>
-      <div className="rowlab" style={{ color: col }}
-        onMouseEnter={() => setHighlight(r)} onMouseLeave={() => setHighlight(null)}
-        title={`Row ${r + 1}: the body ${"xyz"[r]} axis`}>
-        {"xyz"[r]}<sub>B</sub>
-      </div>
+      <button type="button" className="axis-pick row" aria-pressed={on} style={{ "--c": col }} onClick={onToggle}
+        title={`Row ${r + 1} is the body ${"xyz"[r]} axis. Tap to show where its numbers sit.`}>
+        <span className="m">{"xyz"[r]}</span><sub>B</sub>
+      </button>
       {[0, 1, 2].map((c) => (
-        <div key={c} onMouseEnter={() => setHighlight(r)} onMouseLeave={() => setHighlight(null)}>
+        <div key={c} className={on ? "cell-on" : undefined} style={{ "--c": col }}>
           <NumField value={fmt(Q[r][c], 4)} color={col} label={`Q${r + 1}${c + 1}`} onCommit={(v) => onCommit(c, v)} />
         </div>
       ))}
@@ -510,14 +567,50 @@ function RowCells({ r, Q, T, setHighlight, onCommit }) {
   );
 }
 
-function EulerPlayer({ anim, frame, T, onToggle, onScrub, onClose }) {
-  const k = frame.step;
+/** Compact, read-only numbers floated on the scene (the "On the scene" layout). */
+function SceneReadouts({ show, Q, ea, sar, qc, seq, T }) {
+  const f = (v, p = 3) => fmt(v, p);
+  return (
+    <div className="readouts">
+      {show.dcm && (
+        <div className="ro" style={{ "--c": T.rep.dcm }}>
+          <span className="ro-tag">[Q]</span>
+          <span className="ro-mat">
+            {Q.map((row, r) => row.map((v, c) => <span key={`${r}${c}`} style={{ color: `color-mix(in srgb, ${T.axis[r]} 75%, var(--text))` }}>{f(v)}</span>))}
+          </span>
+        </div>
+      )}
+      {show.euler && (
+        <div className="ro" style={{ "--c": T.rep.euler }}>
+          <span className="ro-tag">α β γ</span>
+          <span className="num">{f(ea.alpha, 1)}° {f(ea.beta, 1)}° {f(ea.gamma, 1)}°</span>
+          <span className="faint tiny">{seqName(seq)}</span>
+        </div>
+      )}
+      {show.sar && (
+        <div className="ro" style={{ "--c": T.rep.sar }}>
+          <span className="ro-tag">û, θ</span>
+          <span className="num">{sar.u ? `(${sar.u.map((v) => f(v)).join(", ")})` : "—"}  {f(sar.theta, 1)}°</span>
+        </div>
+      )}
+      {show.quat && (
+        <div className="ro" style={{ "--c": T.rep.quat }}>
+          <span className="ro-tag">q</span>
+          <span className="num">{qc.map((v) => f(v)).join("  ")}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EulerPlayer({ anim, frame, T, onToggle, onScrub, onStep, onClose }) {
+  const k = anim.t > 0 ? frame.step : -1;
   return (
     <div>
       <div className="steps" style={{ marginBottom: 10 }}>
         {[0, 1, 2].map((j) => (
           <button key={j} type="button" className={`step${k === j ? " on" : ""}${k > j ? " done" : ""}`}
-            style={{ "--c": T.axis[anim.seq[j] - 1] }} onClick={() => onScrub(j + 1)}>
+            style={{ "--c": T.axis[anim.seq[j] - 1] }} onClick={() => onStep(j)} title={`Play just the ${GREEK[j]} turn`}>
             <b>{GREEK[j]}</b> about <AxisName seq={anim.seq} k={j} />
           </button>
         ))}

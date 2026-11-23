@@ -23,6 +23,7 @@ const START = { az: 38 * D2R, el: 22 * D2R, dist: 9.6 };
 const EL_LIMIT = 89.4 * D2R;
 const DIST_MIN = 3.4, DIST_MAX = 22;
 const ARC_SEG = 48;
+const EMPTY = [];
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -31,38 +32,56 @@ const UNIT = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.
 
 /* ---------- text labels as sprites ---------- */
 
-function paintLabel(sprite, text, sub, color) {
+/**
+ * Paint a sprite label. Plain labels are italic axis letters with a subscript;
+ * badges sit on a filled pill so they read as "annotation", not "axis".
+ */
+function paintLabel(sprite, { text, sub = "", prefix = "", color, badge = null, mono = false }) {
   const cv = sprite.userData.canvas;
   const g = cv.getContext("2d");
   g.clearRect(0, 0, cv.width, cv.height);
+  const H = cv.height;
+  const main = mono ? "500 60px 'DM Mono', ui-monospace, monospace" : "italic 700 76px 'Times New Roman', Georgia, serif";
+  const subF = "700 44px 'DM Sans Variable', system-ui, sans-serif";
+  const preF = "600 50px 'DM Sans Variable', system-ui, sans-serif";
+  g.font = preF; const wp = prefix ? g.measureText(prefix).width + 12 : 0;
+  g.font = main; const w = g.measureText(text).width;
+  g.font = subF; const ws = sub ? g.measureText(sub).width + 3 : 0;
+  const total = wp + w + ws;
+  let x0 = (cv.width - total) / 2;
+  if (badge) {
+    const pad = 22, bh = 92, bw = Math.min(cv.width - 4, total + pad * 2);
+    const bx = (cv.width - bw) / 2, by = (H - bh) / 2;
+    g.fillStyle = badge;
+    g.beginPath();
+    g.roundRect(bx, by, bw, bh, bh / 2);
+    g.fill();
+  }
   g.fillStyle = color;
   g.textBaseline = "middle";
-  g.font = "italic 600 78px 'Times New Roman', Georgia, serif";
-  const w = g.measureText(text).width;
-  g.font = "600 46px 'DM Sans Variable', system-ui, sans-serif";
-  const ws = sub ? g.measureText(sub).width : 0;
-  const x0 = (cv.width - w - ws - 4) / 2;
-  g.font = "italic 600 78px 'Times New Roman', Georgia, serif";
-  g.fillText(text, x0, cv.height / 2 - 4);
-  if (sub) {
-    g.font = "600 46px 'DM Sans Variable', system-ui, sans-serif";
-    g.fillText(sub, x0 + w + 4, cv.height / 2 + 22);
-  }
+  if (prefix) { g.font = preF; g.fillText(prefix, x0, H / 2 + 2); x0 += wp; }
+  g.font = main; g.fillText(text, x0, H / 2 - (mono ? 0 : 4));
+  if (sub) { g.font = subF; g.fillText(sub, x0 + w + 3, H / 2 + 20); }
   sprite.material.map.needsUpdate = true;
 }
 
-function makeLabel(scale = 0.42) {
+function makeLabel(scale = 0.42, wide = false) {
   const canvas = document.createElement("canvas");
-  canvas.width = 192; canvas.height = 128;
+  canvas.width = wide ? 448 : 224; canvas.height = 128;
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
   const s = new THREE.Sprite(mat);
-  s.scale.set(scale * 1.5, scale, 1);
+  s.scale.set(scale * (canvas.width / 128), scale, 1);
   s.renderOrder = 10;
   s.userData.canvas = canvas;
   return s;
 }
+
+const withAlpha = (hex, a) => {
+  const c = new THREE.Color(hex);
+  return `rgba(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}, ${a})`;
+};
 
 /* ---------- geometry helpers ---------- */
 
@@ -267,8 +286,8 @@ function buildGizmo(container, onPick) {
  */
 export default function Viewport({
   quat, onDrag, highlight = null, showInertial = true, sar = null,
-  ghosts = [], spin = null, gizmo = true, autoSpin = 0, labels = true,
-  onInteract, view = START,
+  ghosts = EMPTY, spin = null, gizmo = true, autoSpin = 0, labels = true,
+  onInteract, view = START, showBody = true, projections = EMPTY,
 }) {
   const T = useTheme();
   const mountRef = useRef(null);
@@ -305,11 +324,11 @@ export default function Viewport({
     for (let i = 0; i < 3; i++) {
       const m = new THREE.LineDashedMaterial({ dashSize: 0.09, gapSize: 0.08, transparent: true, opacity: 0.6 });
       themed.inertial.push(m);
-      const line = dashedAxis(3.1, m);
+      const line = dashedAxis(2.75, m);
       line.quaternion.setFromUnitVectors(UNIT[0], UNIT[i]);
       inertial.add(line);
       const lab = makeLabel(0.34);
-      lab.position.copy(UNIT[i]).multiplyScalar(3.35);
+      lab.position.copy(UNIT[i]).multiplyScalar(2.98);
       themed.labelsI.push(lab);
       inertial.add(lab);
     }
@@ -317,18 +336,20 @@ export default function Viewport({
 
     /* spacecraft + body triad */
     const body = buildCraft(themed);
+    const bodyTriad = new THREE.Group();
+    body.add(bodyTriad);
     const bodyAxes = [];
     for (let i = 0; i < 3; i++) {
       const m = new THREE.MeshBasicMaterial({ transparent: true });
       themed.body.push(m);
       const a = solidArrow(2.25, 0.028, m);
       a.quaternion.setFromUnitVectors(UNIT[1], UNIT[i]);
-      body.add(a);
+      bodyTriad.add(a);
       bodyAxes.push(a);
       const lab = makeLabel(0.42);
       lab.position.copy(UNIT[i]).multiplyScalar(2.85);
       themed.labelsB.push(lab);
-      body.add(lab);
+      bodyTriad.add(lab);
     }
     scene.add(body);
 
@@ -342,8 +363,8 @@ export default function Viewport({
         const line = dashedAxis(2.45, m);
         line.quaternion.setFromUnitVectors(UNIT[0], UNIT[i]);
         g.add(line);
-        const lab = makeLabel(0.32);
-        lab.position.copy(UNIT[i]).multiplyScalar(2.7);
+        const lab = makeLabel(0.27);
+        lab.position.copy(UNIT[i]).multiplyScalar(1.85);
         labs.push(lab);
         g.add(lab);
       }
@@ -378,6 +399,24 @@ export default function Viewport({
     scene.add(spinRod, spinGlow);
     const spinArcMat = new THREE.LineBasicMaterial();
     const spinArc = mkArc(spinArcMat);
+    const spinLabel = makeLabel(0.3, true);
+    spinLabel.visible = false;
+    scene.add(spinLabel);
+
+    /* projections: where the numbers of a vector live on a frame's axes */
+    const proj = [0, 1].map(() => [0, 1, 2].map(() => {
+      const segMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, depthTest: false });
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1, 12), segMat);
+      seg.renderOrder = 5;
+      const dropMat = new THREE.LineDashedMaterial({ dashSize: 0.06, gapSize: 0.05, transparent: true, opacity: 0.9, depthTest: false });
+      const drop = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(1, 0, 0)]), dropMat);
+      drop.renderOrder = 5;
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 10), segMat);
+      dot.renderOrder = 6;
+      const lab = makeLabel(0.26, true);
+      [seg, drop, dot, lab].forEach((o) => { o.visible = false; scene.add(o); });
+      return { seg, segMat, drop, dropMat, dot, lab, key: "" };
+    }));
 
     /* camera orbit */
     const orbit = { az: view.az, el: view.el, dist: view.dist };
@@ -524,8 +563,8 @@ export default function Viewport({
     io.observe(mount);
 
     Object.assign(s, {
-      scene, camera, renderer, body, bodyAxes, inertial, ghostGroups, sarRod, sarArc,
-      spinRod, spinGlow, spinMat, spinGlowMat, spinArc, spinArcMat, themed, invalidate,
+      scene, camera, renderer, body, bodyAxes, bodyTriad, inertial, ghostGroups, sarRod, sarArc,
+      spinRod, spinGlow, spinMat, spinGlowMat, spinArc, spinArcMat, spinLabel, proj, themed, invalidate,
     });
 
     return () => {
@@ -574,11 +613,11 @@ export default function Viewport({
     s.sarArc.head.material.color.set(T.rep.sar);
     const paintAll = () => {
       if (!S.current.themed) return;
-      th.labelsI.forEach((l, i) => paintLabel(l, "XYZ"[i], "", T.inertial));
-      th.labelsB.forEach((l, i) => paintLabel(l, "xyz"[i], "B", T.axis[i]));
-      s.ghostGroups.forEach((g) => {
-        if (g.userData.mark) g.userData.labs.forEach((l, i) => paintLabel(l, "xyz"[i], g.userData.mark, T.axis[i]));
-      });
+      th.labelsI.forEach((l, i) => paintLabel(l, { text: "XYZ"[i], color: T.inertial }));
+      th.labelsB.forEach((l, i) => paintLabel(l, { text: "xyz"[i], sub: "B", color: T.axis[i] }));
+      s.ghostGroups.forEach((g) => { g.userData.mark = null; });
+      s.proj.forEach((set) => set.forEach((p) => { p.key = ""; }));
+      s.spinKey = "";
       s.invalidate();
     };
     paintAll();
@@ -622,7 +661,9 @@ export default function Viewport({
       const [x, y, z, w] = meshQuat(gh.quat);
       g.quaternion.set(x, y, z, w);
       if (g.userData.mark !== gh.mark) {
-        g.userData.labs.forEach((l, i) => paintLabel(l, "xyz"[i], gh.mark || "", T.axis[i]));
+        g.userData.labs.forEach((l, i) => paintLabel(l, {
+          text: "xyz"[i], sub: gh.mark || "", color: "#ffffff", badge: withAlpha(T.axis[i], 0.82),
+        }));
         g.userData.mark = gh.mark;
       }
     });
@@ -647,9 +688,70 @@ export default function Viewport({
       s.spinArcMat.color.set(spin.color);
       s.spinArc.head.material.color.set(spin.color);
       if (s.spinArc.line.visible) drawArc(s.spinArc, n, spin.arcFrom, spin.angle, 1.55);
+      s.spinLabel.visible = !!spin.label;
+      if (spin.label) {
+        const key = `${spin.label.letter}${spin.label.sub}${spin.color}`;
+        if (s.spinKey !== key) {
+          paintLabel(s.spinLabel, { prefix: "about", text: spin.label.letter, sub: spin.label.sub, color: "#ffffff", badge: spin.color });
+          s.spinKey = key;
+        }
+        // put the tag on whichever end of the rod sits higher on screen, so it stays in view
+        s.spinLabel.position.copy(n).multiplyScalar(n.z >= -0.05 ? 3.3 : -3.3);
+      }
+    } else {
+      s.spinLabel.visible = false;
     }
     s.invalidate();
   }, [spin]);
+
+  /* projections: drop lines from a vector's tip onto a frame's axes */
+  useEffect(() => {
+    const s = S.current;
+    if (!s.proj) return;
+    const bodyQ = s.body.quaternion;
+    s.proj.forEach((set, k) => {
+      const pr = projections[k];
+      set.forEach((p, j) => {
+        const on = !!pr;
+        [p.seg, p.drop, p.dot, p.lab].forEach((o) => { o.visible = on; });
+        if (!on) return;
+        const L = pr.length || 2.25;
+        const axis = UNIT[j].clone();
+        if (pr.frame === "body") axis.applyQuaternion(bodyQ);
+        const v = new THREE.Vector3(...pr.vec);
+        const val = v.dot(axis);
+        const tip = v.clone().multiplyScalar(L);
+        const foot = axis.clone().multiplyScalar(val * L);
+        const col = T.axis[j];
+        p.segMat.color.set(col);
+        p.dropMat.color.set(col);
+        p.segMat.opacity = pr.faint ? 0.55 : 0.95;
+        const len = Math.abs(val * L);
+        p.seg.visible = len > 1e-3;
+        if (p.seg.visible) {
+          p.seg.scale.set(pr.faint ? 0.7 : 1, len, pr.faint ? 0.7 : 1);
+          p.seg.position.copy(foot).multiplyScalar(0.5);
+          p.seg.quaternion.setFromUnitVectors(UNIT[1], foot.clone().normalize());
+        }
+        p.dot.position.copy(foot);
+        p.drop.geometry.setFromPoints([tip, foot]);
+        p.drop.geometry.attributes.position.needsUpdate = true;
+        p.drop.computeLineDistances();
+        p.drop.geometry.computeBoundingSphere();
+        // label sits just outside the foot, away from the origin
+        const out = foot.clone().add(axis.clone().multiplyScalar(Math.sign(val || 1) * 0.32));
+        p.lab.position.copy(out);
+        p.lab.visible = pr.labels !== false;
+        const text = (Math.abs(val) < 5e-4 ? 0 : val).toFixed(pr.digits ?? 3);
+        const key = `${text}|${col}|${T.mode}`;
+        if (p.key !== key) {
+          paintLabel(p.lab, { text, mono: true, color: "#ffffff", badge: withAlpha(col, pr.faint ? 0.7 : 0.92) });
+          p.key = key;
+        }
+      });
+    });
+    s.invalidate();
+  }, [projections, quat, T]);
 
   /* highlight + inertial visibility */
   useEffect(() => {
@@ -663,10 +765,11 @@ export default function Viewport({
       a.userData.head.scale.set(k, k, k);
     });
     s.inertial.visible = showInertial;
+    s.bodyTriad.visible = showBody;
     s.themed.labelsB.forEach((l) => { l.visible = labels; });
     s.themed.labelsI.forEach((l) => { l.visible = labels; });
     s.invalidate();
-  }, [highlight, showInertial, labels]);
+  }, [highlight, showInertial, showBody, labels]);
 
   return <div ref={mountRef} className="vp-mount" />;
 }

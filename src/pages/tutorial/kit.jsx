@@ -1,3 +1,6 @@
+import { useMemo } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import Viewport from "../../components/Viewport.jsx";
 
 /* Building blocks shared by the chapters. */
@@ -59,3 +62,14 @@ export function Scene({ height = 380, children, ...props }) {
 
 /** One displayed equation line. */
 export const Eq = ({ children }) => <div className="eq">{children}</div>;
+
+/** KaTeX. Pass a TeX string as the child. `block` centres it on its own line. */
+export function TeX({ children, block, tint }) {
+  const src = Array.isArray(children) ? children.join("") : String(children);
+  const html = useMemo(
+    () => katex.renderToString(src, { displayMode: !!block, throwOnError: false, strict: false, trust: false }),
+    [src, block],
+  );
+  if (block) return <div className={`eq tex${tint ? "" : ""}`} dangerouslySetInnerHTML={{ __html: html }} />;
+  return <span className="tex-i" dangerouslySetInnerHTML={{ __html: html }} />;
+}

@@ -53,7 +53,7 @@ function Working({ p }) {
   const T = useTheme();
   const lines = [];
   if (p.type === "ea-dcm") {
-    lines.push(<>[Q] = R<sub>1</sub>(γ) R<sub>2</sub>(β) R<sub>3</sub>(α), multiplied out with the slide&apos;s 3-2-1 matrix:</>);
+    lines.push(<>[Q] = R<sub>1</sub>(γ) R<sub>2</sub>(β) R<sub>3</sub>(α), multiplied out with the 3-2-1 matrix:</>);
     lines.push(<Mat rows={p.Q} digits={4} color={(r) => T.axis[r]} />);
   } else if (p.type === "dcm-ea") {
     const Q = p.given.Q;
@@ -76,7 +76,7 @@ function Working({ p }) {
     lines.push(<>θ = 2 cos⁻¹(q₄) = 2 cos⁻¹({f(q[3])}) = <b>{f(p.sar.theta, 2)}°</b></>);
     lines.push(<>sin(θ/2) = {f(s)}, so û = (q₁, q₂, q₃)/sin(θ/2) = <b>({p.sar.u.map((v) => f(v)).join(", ")})</b></>);
   } else if (p.type === "sar-dcm") {
-    lines.push(<>Plug û and θ into the slide&apos;s SAR matrix:</>);
+    lines.push(<>Plug û and θ into the SAR matrix:</>);
     lines.push(<Mat rows={p.Q} digits={4} color={(r) => T.axis[r]} />);
   }
   return <div className="working">{lines.map((l, i) => <div key={i}>{l}</div>)}</div>;

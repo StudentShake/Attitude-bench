@@ -9,6 +9,7 @@ import Ch3 from "./Ch3Euler.jsx";
 import Ch4 from "./Ch4SAR.jsx";
 import Ch5 from "./Ch5Quat.jsx";
 import Ch6 from "./Ch6Convert.jsx";
+import MathPage from "./MathPage.jsx";
 
 const BODY = {
   "what-is-attitude": Ch1,
@@ -17,6 +18,7 @@ const BODY = {
   "single-axis-rotation": Ch4,
   quaternions: Ch5,
   converting: Ch6,
+  "the-math": MathPage,
 };
 
 const col = (c) => `var(--${c.color})`;
@@ -51,7 +53,7 @@ function Chapter() {
   const c = chapterBySlug(slug);
   const Body = BODY[slug];
   const { prev, next } = neighbours(slug);
-  useEffect(() => { window.scrollTo(0, 0); }, [slug]);
+  useEffect(() => { if (!window.location.hash) window.scrollTo(0, 0); }, [slug]);
   useEffect(() => {
     if (c) document.title = `${c.title} · Attitude Bench`;
     return () => { document.title = "Attitude Bench · spin a spacecraft, watch the math follow"; };
