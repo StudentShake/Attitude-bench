@@ -6,6 +6,7 @@
 import * as A from './attitude.js';
 import * as C from './course.js';
 import * as D from './director.js';
+import * as P from './practice.js';
 
 let pass = 0, fail = 0;
 const check = (name, cond, info = '') => {
@@ -168,6 +169,28 @@ for (let k = 0; k < 200; k++) {
   const q2 = randQuat();
   check('slerp endpoints', maxDiff(A.quatToDCM(D.slerp(qLib, q2, 0)), A.quatToDCM(qLib)) < 1e-9 &&
     maxDiff(A.quatToDCM(D.slerp(qLib, q2, 1)), A.quatToDCM(q2)) < 1e-9);
+}
+
+console.log('--- Test Prep: answer keys grade as correct, common slips get named ---');
+for (const t of P.TYPES) {
+  for (let k = 0; k < 150; k++) {
+    const p = P.makeProblem(t.key, rnd);
+    const ans = Object.fromEntries(p.ask.map((f) => [f.id, f.value.toFixed(4)]));
+    check(`${t.key} key passes`, p.ask.every((f) => P.grade(f, ans[f.id]).ok), JSON.stringify(p.ask));
+    check(`${t.key} key has no false hint`, P.diagnose(p, ans) === null || p.ask.every((f) => P.grade(f, ans[f.id]).ok));
+  }
+}
+{
+  // a worked check of each diagnosis
+  let p = P.makeProblem('sar-quat', rnd);
+  const sf = [p.q[3], p.q[0], p.q[1], p.q[2]];
+  check('scalar-first slip is named', /scalar last/.test(P.diagnose(p, { q1: sf[0], q2: sf[1], q3: sf[2], q4: sf[3] }) || ''));
+  for (;;) { p = P.makeProblem('quat-sar', rnd); if (p.sar.u.some((v) => v < -0.05)) break; }
+  const abs = p.sar.u.map(Math.abs);
+  check('sign-loss slip is named', /positive/.test(P.diagnose(p, { ux: abs[0], uy: abs[1], uz: abs[2], theta: p.sar.theta }) || ''));
+  p = P.makeProblem('dcm-ea', rnd);
+  check('quadrant slip is named', /180/.test(P.diagnose(p, { alpha: p.ea.alpha + 180, beta: p.ea.beta, gamma: p.ea.gamma }) || ''));
+  check('α given as −30 for 330 is accepted', P.grade({ kind: 'deg', wrap: true, value: 330 }, '-30').ok);
 }
 
 console.log('--- edge cases ---');

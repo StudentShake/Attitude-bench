@@ -5,7 +5,7 @@ import NumField from "./NumField.jsx";
 import Spoiler from "./Spoiler.jsx";
 import { RepCard, Label } from "./RepCard.jsx";
 import { Reset, Dice, Play, Pause, Flip } from "./Icons.jsx";
-import { SEQUENCES, isProper, canonicalQuat, normalizeQuat, orthonormalize, dcmToQuat } from "../lib/attitude.js";
+import { SEQUENCES, isProper, canonicalQuat, normalizeQuat, orthonormalize, dcmToQuat, orthogonalityError } from "../lib/attitude.js";
 import {
   quatToQ, QToEA, EAToQ, QToSAR, SARToQuat, toCourseQuat, fromCourseQuat, SEQ_NICKNAME, seqName,
 } from "../lib/course.js";
@@ -130,9 +130,21 @@ export default function AttitudeBench() {
 
   /** Set the attitude directly (typing, dragging). Stops any animation. */
   const setQuat = useCallback((q) => {
+    const n = canonicalQuat(normalizeQuat(q));
     setAnim(null);
-    setQuatRaw(canonicalQuat(normalizeQuat(q)));
+    setQuatRaw(n);
+    return n;
   }, []);
+
+  /* Typing into a card keeps what you typed on screen (a draft) until the
+     attitude changes some other way. Without this, entering q₁…q₄ one at a
+     time would renormalise after every box and fight you. */
+  const [draft, setDraft] = useState(null);
+  const commitDraft = useCallback((kind, values, toQuat) => {
+    const n = setQuat(toQuat(values));
+    setDraft({ kind, values, forQuat: n });
+  }, [setQuat]);
+  const draftFor = (kind) => (draft && draft.kind === kind && draft.forQuat === quat && !anim ? draft.values : null);
 
   /** Glide to an attitude (Reset, Random). */
   const glideTo = useCallback((to) => {
@@ -166,6 +178,10 @@ export default function AttitudeBench() {
     return flipSign ? c.map((v) => -v) : c;
   }, [shown, flipSign]);
   const resetKey = useMemo(() => quat.join(","), [quat]);
+  const dcmDraft = draftFor("dcm");
+  const sarDraft = draftFor("sar");
+  const quatDraft = draftFor("quat");
+  const sarVals = sarDraft || [sar.u, sar.theta];
 
   /* keep the URL in step (not while something is moving) */
   useEffect(() => {
@@ -303,17 +319,19 @@ export default function AttitudeBench() {
                   </div>
                 ))}
                 {[0, 1, 2].map((r) => (
-                  <RowCells key={r} r={r} Q={Q} T={T} setHighlight={setHighlight}
+                  <RowCells key={r} r={r} Q={dcmDraft || Q} T={T} setHighlight={setHighlight}
                     onCommit={(c, v) => {
-                      const N = Q.map((row) => row.slice());
+                      const N = (dcmDraft || Q).map((row) => row.slice());
                       N[r][c] = v;
-                      setQuat(dcmToQuat(orthonormalize(N)));
+                      commitDraft("dcm", N, (M) => dcmToQuat(orthonormalize(M)));
                     }} />
                 ))}
               </div>
             </Spoiler>
             <p className="note">
-              Each row is one body axis written in inertial coordinates. Hover a row to light that axis up.
+              {dcmDraft && orthogonalityError(dcmDraft) > 1e-3
+                ? "That's not a rotation matrix yet, so the spacecraft shows the closest one. Keep typing."
+                : "Each row is one body axis written in inertial coordinates. Hover a row to light that axis up."}
             </p>
           </RepCard>
 
@@ -383,23 +401,26 @@ export default function AttitudeBench() {
                 {[0, 1, 2].map((i) => (
                   <div key={i}>
                     <Label color={T.axis[i]}><span className="m">u</span><sub>{"xyz"[i]}</sub></Label>
-                    <NumField value={sar.u ? fmt(sar.u[i], 4) : "—"} color={T.axis[i]} label={`u ${"xyz"[i]}`}
+                    <NumField value={sarVals[0] ? fmt(sarVals[0][i], 4) : "—"} color={T.axis[i]} label={`u ${"xyz"[i]}`}
                       onCommit={(v) => {
-                        const u = sar.u ? sar.u.slice() : [1, 0, 0];
+                        const u = sarVals[0] ? sarVals[0].slice() : [0, 0, 0];
                         u[i] = v;
                         if (Math.hypot(...u) < 1e-9) return;
-                        setQuat(fromCourseQuat(SARToQuat(u, sar.theta)));
+                        commitDraft("sar", [u, sarVals[1]], ([uu, th]) => fromCourseQuat(SARToQuat(uu, th)));
                       }} />
                   </div>
                 ))}
                 <div>
                   <Label color={T.rep.sar}><span className="m">θ</span></Label>
-                  <NumField value={fmt(sar.theta, 2)} color={T.rep.sar} suffix="°" label="theta in degrees"
-                    onCommit={(v) => setQuat(fromCourseQuat(SARToQuat(sar.u || [0, 0, 1], v)))} />
+                  <NumField value={fmt(sarVals[1], 2)} color={T.rep.sar} suffix="°" label="theta in degrees"
+                    onCommit={(v) => commitDraft("sar", [sarVals[0] || [0, 0, 1], v], ([uu, th]) => fromCourseQuat(SARToQuat(uu, th)))} />
                 </div>
               </div>
             </Spoiler>
-            {!sar.u && <p className="note">No rotation yet, so there's no axis to show. Turn the spacecraft a little.</p>}
+            {!sar.u && !sarDraft && <p className="note">No rotation yet, so there&apos;s no axis to show. Turn the spacecraft a little.</p>}
+            {sarDraft && sarDraft[0] && Math.abs(Math.hypot(...sarDraft[0]) - 1) > 1e-3 && (
+              <p className="note">|û| = {fmt(Math.hypot(...sarDraft[0]), 4)}. The spacecraft uses û scaled to length 1.</p>
+            )}
             <div className="player">
               {!sarAnim ? (
                 <div className="player-row" style={{ flexWrap: "wrap" }}>
@@ -432,24 +453,28 @@ export default function AttitudeBench() {
               <div className="grid4">
                 {[0, 1, 2, 3].map((i) => {
                   const col = i < 3 ? T.axis[i] : T.rep.quat;
-                  const v = qc[i];
+                  const v = (quatDraft || qc)[i];
                   return (
                     <div key={i} style={{ "--c": col }}>
                       <Label color={col}><span className="m">q</span><sub>{i + 1}</sub>{i === 3 && <span className="faint" style={{ fontWeight: 500 }}> scalar</span>}</Label>
                       <NumField value={fmt(v, 4)} color={col} label={`q${i + 1}`}
                         onCommit={(nv) => {
-                          const c = qc.slice();
+                          const c = (quatDraft || qc).slice();
                           c[i] = nv;
-                          setQuat(fromCourseQuat(c));
+                          if (Math.hypot(...c) < 1e-9) return;
+                          commitDraft("quat", c, fromCourseQuat);
                         }} />
                       <div className="qbar" aria-hidden="true">
-                        <i style={{ left: `${50 + Math.min(0, v) * 50}%`, width: `${Math.abs(v) * 50}%` }} />
+                        <i style={{ left: `${50 + Math.max(-1, Math.min(0, v)) * 50}%`, width: `${Math.min(1, Math.abs(v)) * 50}%` }} />
                       </div>
                     </div>
                   );
                 })}
               </div>
             </Spoiler>
+            {quatDraft && Math.abs(Math.hypot(...quatDraft) - 1) > 1e-3 && (
+              <p className="note">|q| = {fmt(Math.hypot(...quatDraft), 4)}. The spacecraft uses q divided by that, so it has length 1.</p>
+            )}
             <div className="player-row" style={{ marginTop: 14, flexWrap: "wrap" }}>
               <button type="button" className="btn sm" onClick={() => setFlipSign((f) => !f)} aria-pressed={flipSign}>
                 <Flip size={16} /> {flipSign ? "Back to +q" : "Flip to −q"}
