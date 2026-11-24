@@ -600,3 +600,20 @@ label.blk { display: block; margin-top: 6px; }
 .hero h1.sad b { color: var(--primary); font-weight: inherit; }
 [data-theme="light"] .hero h1.sad b { color: #C98A00; }
 .hero h1.sad .hl { margin-top: 6px; }
+.type-groups { display: grid; gap: 4px; margin-bottom: 16px; }
+.type-groups .type-row { margin-bottom: 2px; align-items: center; gap: 6px 8px; }
+.type-lab { width: 100%; font-size: 12.5px; font-weight: 700; color: var(--faint); margin-top: 4px; }
+.tag { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; border: 1.5px dashed color-mix(in srgb, var(--c) 60%, var(--line)); color: var(--dim); }
+.wk-stop { font-family: var(--sans); font-weight: 800; font-size: 13px; color: var(--c); margin-top: 6px; letter-spacing: .01em; }
+.working > div:first-child .wk-stop { margin-top: 0; }
+.prob-code { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1.5px dashed var(--line); }
+.prob-code code { font-family: var(--mono); color: var(--dim); font-size: 13px; }
+.link-btn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 13.5px; font-weight: 700; color: var(--c); text-decoration: underline; text-underline-offset: 3px; }
+/* section links */
+.anchored { scroll-margin-top: 86px; position: relative; }
+.h-link {
+  margin-left: 10px; padding: 0 4px; border: 0; background: none; cursor: pointer; vertical-align: middle;
+  font: 700 0.62em var(--sans); color: var(--faint); opacity: .45; transition: opacity .15s, color .15s;
+}
+.anchored:hover .h-link, .h-link:focus-visible { opacity: 1; color: var(--c, var(--primary)); }
+.h-copied { margin-left: 6px; font: 700 13px var(--sans); color: var(--dim); vertical-align: middle; }

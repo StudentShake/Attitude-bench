@@ -53,7 +53,14 @@ function Chapter() {
   const c = chapterBySlug(slug);
   const Body = BODY[slug];
   const { prev, next } = neighbours(slug);
-  useEffect(() => { if (!window.location.hash) window.scrollTo(0, 0); }, [slug]);
+  const { hash } = useLocation();
+  // open at the top, or at a linked section (#its-heading)
+  useEffect(() => {
+    if (!hash) { window.scrollTo(0, 0); return; }
+    const go = () => document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+    const a = setTimeout(go, 60), b = setTimeout(go, 450); // again once figures have settled
+    return () => { clearTimeout(a); clearTimeout(b); };
+  }, [slug, hash]);
   useEffect(() => {
     if (c) document.title = `${c.title} · Attitude Bench`;
     return () => { document.title = "Attitude Bench · spin a spacecraft, watch the math follow"; };

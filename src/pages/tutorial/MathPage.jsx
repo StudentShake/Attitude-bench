@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { useState } from "react";
 import { useTheme } from "../../lib/theme.js";
-import { Fig, M, TeX, MathFlow, SvgKey } from "./kit.jsx";
+import { Fig, M, TeX, MathFlow, SvgKey, H2 } from "./kit.jsx";
 import { ortho, arc3, path, fromAzEl, cross, scale, add } from "./ortho.js";
 
 /* ============================================================================
@@ -293,13 +292,6 @@ const QUAT = [
 ];
 
 export default function MathPage() {
-  const { hash } = useLocation();
-  useEffect(() => {
-    if (!hash) return;
-    const el = document.getElementById(hash.slice(1));
-    if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
-  }, [hash]);
-
   return (
     <>
       <p className="lede">
@@ -307,34 +299,34 @@ export default function MathPage() {
         Hover or tap the notes between the boxes to light up the pieces they&apos;re talking about.
       </p>
 
-      <h2 id="nine-to-three">Why nine numbers only have three free</h2>
+      <H2 id="nine-to-three">Why nine numbers only have three free</H2>
       <MathFlow tone="dcm" steps={NINE} />
       <p>Here&apos;s the same count done by hand. Pick the rows one at a time and watch the choices shrink:</p>
       <Builder />
 
-      <h2 id="angles-to-q">Angles to [Q]: multiplying it out</h2>
+      <H2 id="angles-to-q">Angles to [Q]: multiplying it out</H2>
       <p>
         For 3-2-1, <TeX>{String.raw`[Q] = R_1(\gamma)\,R_2(\beta)\,R_3(\alpha)`}</TeX>. Do it in two products, right
         to left. Short forms: <TeX>{String.raw`c\alpha = \cos\alpha,\ s\alpha = \sin\alpha`}</TeX>.
       </p>
       <Multiply />
 
-      <h2 id="q-to-angles">[Q] to angles: one angle at a time</h2>
+      <H2 id="q-to-angles">[Q] to angles: one angle at a time</H2>
       <MathFlow tone="euler" steps={QANG} />
 
-      <h2 id="sar">SAR from [Q]: the trace</h2>
+      <H2 id="sar">SAR from [Q]: the trace</H2>
       <MathFlow tone="sar" steps={TRACE} />
-      <h2 id="sar-axis">SAR from [Q]: the differences</h2>
+      <H2 id="sar-axis">SAR from [Q]: the differences</H2>
       <MathFlow tone="sar" steps={DIFF} />
 
-      <h2 id="sar-to-q">Where the SAR matrix comes from</h2>
+      <H2 id="sar-to-q">Where the SAR matrix comes from</H2>
       <p>
         The big SAR matrix is three simple matrices added together. One keeps the part of a vector along û, the other
         two turn the part at right angles to û by θ.
       </p>
       <MathFlow tone="sar" steps={SARQ} />
 
-      <h2 id="quaternion">Quaternions and the SAR</h2>
+      <H2 id="quaternion">Quaternions and the SAR</H2>
       <MathFlow tone="quat" steps={QUAT} />
       <p>
         Why half angles? When a quaternion rotates a vector, it gets applied twice: once on each side of the vector.

@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { useTheme } from "../../lib/theme.js";
 import { canonicalQuat, dcmToQuat, M1, M2, M3 } from "../../lib/attitude.js";
 import { EAToQ, quatToQ } from "../../lib/course.js";
-import { Fig, M, Mat, Scene, Ask, TeX, MathFlow } from "./kit.jsx";
+import { Fig, M, Mat, Scene, Ask, TeX, MathFlow, H2 } from "./kit.jsx";
 
 const serif = { fontFamily: "Times New Roman, serif", fontStyle: "italic", fontWeight: 700 };
 const sans = { fontFamily: "var(--sans)" };
@@ -364,7 +364,7 @@ export default function Ch2() {
         to another. The course calls it <M>[Q]</M>.
       </p>
 
-      <h2>What one number means</h2>
+      <H2>What one number means</H2>
       <p>
         Take two frames that share an origin: an old one <M>xyz</M> and a new one <M>x′y′z′</M>. Every entry
         of <M>[Q]</M> compares one new axis with one old axis.
@@ -372,7 +372,7 @@ export default function Ch2() {
       <Shadow />
       <TeX block>{String.raw`Q_{ij} = \hat u'_i \cdot \hat u_j = \cos(\text{angle between new axis } i \text{ and old axis } j)`}</TeX>
 
-      <h2>Three shadows make a row</h2>
+      <H2>Three shadows make a row</H2>
       <Cosines />
       <p>Stack the three new axes as rows and you have the whole matrix:</p>
       <TeX block>{String.raw`\begin{bmatrix}\hat\imath'\\ \hat\jmath'\\ \hat k'\end{bmatrix} = [Q]\begin{bmatrix}\hat\imath\\ \hat\jmath\\ \hat k\end{bmatrix} \qquad\qquad \bar v\,|_2 = [Q]\,\bar v\,|_1`}</TeX>
@@ -382,7 +382,7 @@ export default function Ch2() {
       </p>
       <RowsLive />
 
-      <h2>Nine numbers, but only three are free</h2>
+      <H2>Nine numbers, but only three are free</H2>
       <p>
         The rows aren&apos;t just any numbers. Each one is an axis, so it has length 1, and the three axes are
         at right angles to each other. Written out, that&apos;s six equations:
@@ -396,7 +396,7 @@ export default function Ch2() {
         <Link className="link" to="/tutorial/the-math#nine-to-three">Build a [Q] yourself, one free number at a time →</Link>
       </p>
 
-      <h2>Turning about one axis</h2>
+      <H2>Turning about one axis</H2>
       <p>
         The simplest DCMs turn the frame about just one of its own axes. They&apos;re called <M>R</M><sub>1</sub>,{" "}
         <M>R</M><sub>2</sub> and <M>R</M><sub>3</sub> for turns about <M>x</M>, <M>y</M> and <M>z</M>.
@@ -409,7 +409,7 @@ export default function Ch2() {
         cycle <M>z → x</M>.
       </p>
 
-      <h2>Where the numbers in R₁, R₂ and R₃ come from</h2>
+      <H2>Where the numbers in R₁, R₂ and R₃ come from</H2>
       <p>
         You don&apos;t have to memorise them. Use the rule from the top of the page: each row is a new axis written in
         the old frame. Take <M>R</M><sub>3</sub>, a turn of <M>φ</M> about <M>z</M>, and read the shadows off the picture above.
@@ -426,7 +426,7 @@ export default function Ch2() {
         </p>
       </Ask>
 
-      <h2>Going back is free</h2>
+      <H2>Going back is free</H2>
       <p>
         Because the rows are perpendicular unit vectors, <M>[Q][Q]</M><sup>T</sup> is the identity. So the
         inverse is just the transpose: flip the matrix across its diagonal.

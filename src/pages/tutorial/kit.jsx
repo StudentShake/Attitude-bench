@@ -130,3 +130,28 @@ export function SvgKey({ x = 10, y = 18, items, text }) {
     </g>
   );
 }
+
+/* "Why tan⁻¹ can be 180° off" → "why-tan-1-can-be-180-off" */
+const GREEK = { θ: "theta", φ: "phi", α: "alpha", β: "beta", γ: "gamma", "−": " minus " };
+const slugify = (text) => String(text).replace(/[θφαβγ−]/g, (ch) => ` ${GREEK[ch]} `).normalize("NFKD")
+  .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+/** A section heading with its own link, so a section can be sent to someone. */
+export function H2({ id, children }) {
+  const slug = id || slugify(children);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    const url = `${window.location.origin}${window.location.pathname}#${slug}`;
+    window.history.replaceState(window.history.state, "", `#${slug}`);
+    try { await navigator.clipboard.writeText(url); } catch { window.prompt("Copy this link:", url); return; }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <h2 id={slug} className="anchored">
+      {children}
+      <button type="button" className="h-link" onClick={copy} aria-label="Copy a link to this section" title="Copy a link to this section">#</button>
+      {copied && <span className="h-copied">Link copied</span>}
+    </h2>
+  );
+}

@@ -193,6 +193,65 @@ for (const t of P.TYPES) {
   check('α given as −30 for 330 is accepted', P.grade({ kind: 'deg', wrap: true, value: 330 }, '-30').ok);
 }
 
+
+console.log('--- Test Prep: problems with a stop in between agree with a different route ---');
+{
+  const angWrap = (a, b) => Math.abs(((C.wrap360(a) - C.wrap360(b) + 540) % 360) - 180);
+  for (let k = 0; k < 200; k++) {
+    const sd = Math.floor(rnd() * 4294967296);
+    // EA -> quaternion through [Q] and the SAR, versus the library's own Euler -> quaternion
+    let p = P.problemFrom('ea-quat', sd);
+    const lib = C.toCourseQuat(A.canonicalQuat(A.dcmToQuat(C.EAToQ(...p.given.ea, [3, 2, 1]))));
+    const qk = p.q[3] < 0 ? p.q.map((v) => -v) : p.q;
+    check('ea-quat key matches the library route', vdiff(qk, lib.map((v, i) => (lib[3] < 0 ? -v : v))) < 1e-9 && p.q[3] >= 0, JSON.stringify(p.given));
+    // DCM -> quaternion key keeps q4 >= 0 and matches the library from the given (rounded) matrix
+    p = P.problemFrom('dcm-quat', sd);
+    const fromGiven = C.toCourseQuat(A.canonicalQuat(A.dcmToQuat(A.orthonormalize(p.given.Q))));
+    check('dcm-quat key q4 >= 0', p.q[3] >= 0);
+    check('dcm-quat key matches the library within grading tolerance', vdiff(p.q, fromGiven) < P.TOL.num, JSON.stringify([p.q, fromGiven]));
+    // SAR -> EA through [Q], versus SAR -> quaternion -> library DCM -> EA
+    p = P.problemFrom('sar-ea', sd);
+    const viaQuat = C.QToEA(C.quatToQ(C.fromCourseQuat(C.SARToQuat(p.given.u, p.given.theta))), [3, 2, 1]);
+    check('sar-ea key matches the quaternion route', angWrap(viaQuat.alpha, p.ea.alpha) < 1e-6 && Math.abs(viaQuat.beta - p.ea.beta) < 1e-6 && angWrap(viaQuat.gamma, p.ea.gamma) < 1e-6);
+    // quaternion -> EA through the SAR and [Q], versus the library's quaternion -> DCM
+    p = P.problemFrom('quat-ea', sd);
+    const qn = p.given.q.map((v) => v / Math.hypot(...p.given.q));
+    const direct = C.QToEA(C.quatToQ(C.fromCourseQuat(qn)), [3, 2, 1]);
+    check('quat-ea key matches the direct route', angWrap(direct.alpha, p.ea.alpha) < 1e-6 && Math.abs(direct.beta - p.ea.beta) < 1e-6 && angWrap(direct.gamma, p.ea.gamma) < 1e-6);
+    // quaternion -> DCM entries, versus the library
+    p = P.problemFrom('quat-dcm', sd);
+    const qd = p.given.q.map((v) => v / Math.hypot(...p.given.q));
+    check('quat-dcm key matches the library', maxDiff(p.Q, C.quatToQ(C.fromCourseQuat(qd))) < 1e-9);
+    // EA -> SAR, versus the SAR of the library's quaternion
+    p = P.problemFrom('ea-sar', sd);
+    const viaLib = C.quatToSAR(lib);
+    check('ea-sar key matches the quaternion route', vdiff(p.sar.u, viaLib.u) < 1e-9 && Math.abs(p.sar.theta - viaLib.theta) < 1e-7, JSON.stringify([p.sar, viaLib]));
+  }
+}
+console.log('--- Test Prep: a code always gives the same problem ---');
+for (const t of P.TYPES) {
+  for (let k = 0; k < 20; k++) {
+    const sd = Math.floor(rnd() * 4294967296);
+    const code = P.problemCode(t.key, sd);
+    const back = P.parseCode(code);
+    check(`${t.key} code round-trips`, back && back.type === t.key && back.seed === sd, code);
+    check(`${t.key} same code, same problem`, JSON.stringify(P.problemFrom(t.key, sd)) === JSON.stringify(P.problemFrom(back.type, back.seed)));
+  }
+}
+check('bad codes are refused', [null, '', 'nope', 'ea-dcm', 'ea-dcm.', 'xx-yy.12', 'ea-dcm.zzzzzzzz', 'ea-dcm.zzzzzzz'].every((c) => P.parseCode(c) === null));
+{
+  // the slips in the new problems get named too
+  let p = P.problemFrom('ea-quat', 7);
+  check('−q slip is named', /−q/.test(P.diagnose(p, Object.fromEntries(p.q.map((v, i) => [`q${i + 1}`, -v]))) || ''));
+  for (let sd = 1; ; sd++) { p = P.problemFrom('ea-sar', sd); if (p.sar.u.some((v) => v < -0.05)) break; }
+  check('sign-loss slip is named (EA → SAR)', /positive/.test(P.diagnose(p, { ux: Math.abs(p.sar.u[0]), uy: Math.abs(p.sar.u[1]), uz: Math.abs(p.sar.u[2]), theta: p.sar.theta }) || ''));
+  p = P.problemFrom('sar-ea', 11);
+  check('quadrant slip is named (SAR → EA)', /180/.test(P.diagnose(p, { alpha: p.ea.alpha + 180, beta: p.ea.beta, gamma: p.ea.gamma }) || ''));
+  for (let sd = 1; ; sd++) { p = P.problemFrom('quat-dcm', sd); if (p.ask.some((f) => f.id[1] !== f.id[2] && Math.abs(f.value - p.Q[+f.id[2] - 1][+f.id[1] - 1]) > 0.05)) break; }
+  const off = p.ask.find((f) => f.id[1] !== f.id[2]);
+  check('swapped cell is named (QUAT → DCM)', /swapped/.test(P.diagnose(p, { [off.id]: p.Q[+off.id[2] - 1][+off.id[1] - 1] }) || ''));
+}
+
 console.log('--- edge cases ---');
 {
   check('identity: θ = 0, no axis', C.QToSAR(A.quatToDCM([1, 0, 0, 0])).u === null);

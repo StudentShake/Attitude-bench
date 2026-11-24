@@ -4,7 +4,7 @@ import { useTheme } from "../../lib/theme.js";
 import { EAToQ, wrap360 } from "../../lib/course.js";
 import { SEQUENCES } from "../../lib/attitude.js";
 import SequencePlayer from "../../components/SequencePlayer.jsx";
-import { Fig, M, Ask, TeX } from "./kit.jsx";
+import { Fig, M, Ask, TeX, H2 } from "./kit.jsx";
 
 const SYM = ["1-2-1", "1-3-1", "2-1-2", "2-3-2", "3-1-3", "3-2-3"];
 const ASYM = ["3-2-1", "2-3-1", "1-3-2", "3-1-2", "2-1-3", "1-2-3"];
@@ -243,7 +243,7 @@ export default function Ch3() {
         <SequencePlayer seqIndex={si} onSeq={setSi} playKey={playKey} />
       </div>
 
-      <h2>Each turn uses the frame you just made</h2>
+      <H2>Each turn uses the frame you just made</H2>
       <p>
         Start in <M>XYZ</M>. The first turn, <M>α</M>, gives a new frame <M>x</M><sub>1</sub><M>y</M><sub>1</sub><M>z</M><sub>1</sub>.
         The second turn is about an axis of <i>that</i> frame and gives <M>x</M><sub>2</sub><M>y</M><sub>2</sub><M>z</M><sub>2</sub>.
@@ -255,7 +255,7 @@ export default function Ch3() {
         axis than the one before it.
       </p>
 
-      <h2>Twelve sequences</h2>
+      <H2>Twelve sequences</H2>
       <p>
         That rule leaves 12 sequences. When the first and third axes match the sequence is <b>symmetric</b>;
         otherwise it&apos;s <b>asymmetric</b>. Tap any of them to watch it in the player above.
@@ -269,7 +269,7 @@ export default function Ch3() {
         </div>
       </Fig>
 
-      <h2>From angles to [Q]</h2>
+      <H2>From angles to [Q]</H2>
       <p>
         Multiply the three elementary matrices. For 3-2-1, <M>α</M> is about <M>z</M>, <M>β</M> about the new{" "}
         <M>y</M>, <M>γ</M> about the newest <M>x</M>:
@@ -279,15 +279,15 @@ export default function Ch3() {
       <TeX block>{String.raw`[Q]_{321} = \begin{bmatrix} c\alpha\, c\beta & s\alpha\, c\beta & -s\beta \\ c\alpha\, s\beta\, s\gamma - s\alpha\, c\gamma & s\alpha\, s\beta\, s\gamma + c\alpha\, c\gamma & c\beta\, s\gamma \\ c\alpha\, s\beta\, c\gamma + s\alpha\, s\gamma & s\alpha\, s\beta\, c\gamma - c\alpha\, s\gamma & c\beta\, c\gamma \end{bmatrix}`}</TeX>
       <p><Link className="link" to="/tutorial/the-math#angles-to-q">Watch it multiply out, one entry at a time →</Link></p>
 
-      <h2>From [Q] back to angles</h2>
+      <H2>From [Q] back to angles</H2>
       <p>Three entries are enough, because each one isolates a single angle:</p>
       <TeX block>{String.raw`\beta = \sin^{-1}(-Q_{13}) \qquad \alpha = \tan^{-1}\!\frac{Q_{12}}{Q_{11}} \qquad \gamma = \tan^{-1}\!\frac{Q_{23}}{Q_{33}}`}</TeX>
       <AngleHunt />
       <p><Link className="link" to="/tutorial/the-math#q-to-angles">Why these entries? See the cancelling →</Link></p>
 
-      <h2>Why tan⁻¹ can be 180° off</h2>
+      <H2>Why tan⁻¹ can be 180° off</H2>
       <Quadrant />
-      <h2>How to know, and how to fix it</h2>
+      <H2>How to know, and how to fix it</H2>
       <p>You only need the sign of the bottom of the fraction. Same rule for γ with Q₃₃ on the bottom.</p>
       <QuadrantRules />
       <Ask q="Which matrix goes on the right?" tone="euler">

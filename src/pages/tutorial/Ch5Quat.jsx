@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
 import { SARToQuat, EAToQ, QToSAR } from "../../lib/course.js";
 import { dcmToQuat, canonicalQuat, mul } from "../../lib/attitude.js";
-import { Fig, M, TeX, Mat, Scene } from "./kit.jsx";
+import { Fig, M, TeX, Mat, Scene, H2 } from "./kit.jsx";
 
 // same example as the single-axis chapter: α 50°, β 10°, γ 40° (3-2-1), whose axis has three easy-to-see parts
 const U = QToSAR(EAToQ(50, 10, 40, [3, 2, 1])).u;
@@ -76,6 +76,7 @@ function VectorPart() {
   const P = (x, y, z) => [235 - x * 120 + y * 185, 250 - z * 200 + x * 72];
   const o = P(0, 0, 0), uT = P(...U), qT = P(...q);
   const feet = [P(q[0], 0, 0), P(0, q[1], 0), P(0, 0, q[2])];
+  const floor = P(q[0], q[1], 0);
   const sans = { fontFamily: "var(--sans)", fontWeight: 700 };
   // q1 sits above the X axis, q2 under the Y axis, q3 left of the Z axis, each kept clear of the origin
   const labAt = [
@@ -100,6 +101,10 @@ function VectorPart() {
             <line x1={o[0]} y1={o[1]} x2={uT[0]} y2={uT[1]} stroke={T.rep.sar} strokeWidth="3.5" strokeDasharray="7 5" />
             <circle cx={uT[0]} cy={uT[1]} r="5" fill={T.rep.sar} />
             <text x={uT[0] + 9} y={uT[1] - 6} fill={T.rep.sar} fontSize="24" style={{ fontFamily: "Times New Roman", fontStyle: "italic", fontWeight: 700, ...halo(T) }}>û</text>
+            {/* the box the shadows make, faint, as in the DCM chapter */}
+            {[[floor, feet[0]], [floor, feet[1]], [floor, qT]].map(([a, b], i) => (
+              <line key={`box${i}`} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={T.line} strokeWidth="1.5" />
+            ))}
             {feet.map((f, i) => (
               <g key={i}>
                 <line x1={o[0]} y1={o[1]} x2={f[0]} y2={f[1]} stroke={T.axis[i]} strokeWidth="8" strokeLinecap="round" opacity=".85" />
@@ -271,7 +276,7 @@ export default function Ch5() {
         attitude, they&apos;re a repackaged single-axis rotation that turns out to be easier to compute with.
       </p>
 
-      <h2>Built from the SAR</h2>
+      <H2>Built from the SAR</H2>
       <p>Take the axis <M>û</M> and angle <M>θ</M> from the last chapter and halve the angle:</p>
       <TeX block>{String.raw`\bar{\bar q} = \begin{bmatrix} q_1 \\ q_2 \\ q_3 \\ q_4 \end{bmatrix} = \begin{bmatrix} u_x \sin(\theta/2) \\ u_y \sin(\theta/2) \\ u_z \sin(\theta/2) \\ \cos(\theta/2) \end{bmatrix}`}</TeX>
       <p>
@@ -279,7 +284,7 @@ export default function Ch5() {
         first, so check which one you&apos;re looking at before you compare numbers.
       </p>
       <HalfAngle />
-      <h2>Where q₁, q₂ and q₃ come from</h2>
+      <H2>Where q₁, q₂ and q₃ come from</H2>
       <p>
         The dial shows how big the vector part is: sin(<M>θ</M>/2). Its direction is just <M>û</M>. Split that
         shorter arrow into its X, Y and Z pieces and you have the first three numbers.
@@ -290,7 +295,7 @@ export default function Ch5() {
         numbers, one constraint, three free. Same count as always.
       </p>
 
-      <h2>q and −q are the same attitude</h2>
+      <H2>q and −q are the same attitude</H2>
       <p>
         Flip every sign and you get a turn of 360° − <M>θ</M> about −<M>û</M>, which ends in the same place.
         So each attitude has two quaternions. This site always shows the one with <M>q</M><sub>4</sub> ≥ 0,
@@ -298,7 +303,7 @@ export default function Ch5() {
         <Link className="link" to="/playground">Playground</Link>.
       </p>
 
-      <h2>Chaining turns</h2>
+      <H2>Chaining turns</H2>
       <p>
         A spacecraft rarely makes one turn and stops. It slews from attitude 1 to 2, then from 2 to 3. Often you
         know each slew separately and want the total: where is frame 3 relative to frame 1?
@@ -311,11 +316,11 @@ export default function Ch5() {
       </p>
       <ChainLive />
 
-      <h2>Why spacecraft store quaternions</h2>
+      <H2>Why spacecraft store quaternions</H2>
       <Storage />
       <ChainCost />
 
-      <h2>Back to û and θ</h2>
+      <H2>Back to û and θ</H2>
       <p>Undo the two steps: the angle from q₄, then divide the vector part by sin(<M>θ</M>/2) to get back to length 1.</p>
       <TeX block>{String.raw`\theta = 2\cos^{-1}(q_4) \qquad \hat u = \frac{1}{\sin(\theta/2)}\begin{bmatrix} q_1 \\ q_2 \\ q_3 \end{bmatrix}`}</TeX>
       <p><Link className="link" to="/tutorial/the-math#quaternion">Why half angles? See it worked out →</Link></p>

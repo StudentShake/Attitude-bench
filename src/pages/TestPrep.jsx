@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Page } from "../components/SiteChrome.jsx";
 import { Check, Cross, Arrow } from "../components/Icons.jsx";
 import { Mat } from "./tutorial/kit.jsx";
 import { useTheme } from "../lib/theme.js";
-import { TYPES, makeProblem, grade, diagnose } from "../lib/practice.js";
+import { TYPES, grade, diagnose, isJump, problemFrom, problemCode, parseCode, newSeed } from "../lib/practice.js";
 
 const KEY = "attitude-bench:practice";
 const f = (v, p = 4) => { const s = v.toFixed(p); return /^-0\.?0*$/.test(s) ? s.slice(1) : s; };
@@ -45,63 +45,144 @@ const PROMPT = {
   "sar-quat": "Find the quaternion (scalar last).",
   "quat-sar": "Find the Euler axis û and angle θ.",
   "sar-dcm": "Build [Q] from the SAR and give these two entries.",
+  "ea-sar": "Find the Euler axis û and angle θ.",
+  "sar-ea": "Find the 3-2-1 Euler angles.",
+  "dcm-quat": "Find the quaternion (scalar last, q₄ ≥ 0).",
+  "quat-dcm": "Build [Q] and give these two entries.",
+  "ea-quat": "Find the quaternion (scalar last, q₄ ≥ 0).",
+  "quat-ea": "Find the 3-2-1 Euler angles.",
 };
+const NAME = { euler: "EA", dcm: "[Q]", sar: "SAR", quat: "q" };
 
 /* ---------- the working, from the same library ---------- */
+
+/* pieces of working, reused by the problems with a stop in between */
+const wkMatrix = (Q, T, lead) => [<>{lead}</>, <Mat rows={Q} digits={4} color={(r) => T.axis[r]} />];
+const wkEA = (Q, ea) => [
+  <>β = sin⁻¹(−Q₁₃) = sin⁻¹({f(-Q[0][2])}) = <b>{f(ea.beta, 2)}°</b></>,
+  <>α = atan2(Q₁₂, Q₁₁) = atan2({f(Q[0][1])}, {f(Q[0][0])}) → <b>{f(ea.alpha, 2)}°</b></>,
+  <>γ = atan2(Q₂₃, Q₃₃) = atan2({f(Q[1][2])}, {f(Q[2][2])}) → <b>{f(ea.gamma, 2)}°</b></>,
+  <span className="dim">α and γ are put between 0° and 360°.</span>,
+];
+const wkSARfromQ = (Q, sar) => {
+  const tr = Q[0][0] + Q[1][1] + Q[2][2], g = 2 * Math.sin(sar.theta * Math.PI / 180);
+  return [
+    <>θ = cos⁻¹((tr − 1)/2) = cos⁻¹(({f(tr)} − 1)/2) = <b>{f(sar.theta, 2)}°</b></>,
+    <>2 sin θ = {f(g)}</>,
+    <>u<sub>x</sub> = (Q₂₃ − Q₃₂)/(2 sin θ) = <b>{f(sar.u[0])}</b>, u<sub>y</sub> = (Q₃₁ − Q₁₃)/(2 sin θ) = <b>{f(sar.u[1])}</b>, u<sub>z</sub> = (Q₁₂ − Q₂₁)/(2 sin θ) = <b>{f(sar.u[2])}</b></>,
+  ];
+};
+const wkQuatFromSAR = (sar, q) => {
+  const h = sar.theta / 2, s = Math.sin(h * Math.PI / 180);
+  return [
+    <>θ/2 = {f(h, 2)}°, sin(θ/2) = {f(s)}, cos(θ/2) = {f(q[3])}</>,
+    <>q = [ û sin(θ/2) ; cos(θ/2) ] = [ <b>{q.map((v) => f(v)).join(",  ")}</b> ]</>,
+  ];
+};
+const wkSARfromQuat = (q, sar) => {
+  const s = Math.sin(sar.theta * Math.PI / 360);
+  return [
+    <>θ = 2 cos⁻¹(q₄) = 2 cos⁻¹({f(q[3])}) = <b>{f(sar.theta, 2)}°</b></>,
+    <>sin(θ/2) = {f(s)}, so û = (q₁, q₂, q₃)/sin(θ/2) = <b>({sar.u.map((v) => f(v)).join(", ")})</b></>,
+  ];
+};
+const stop = (n, from, to) => <div className="wk-stop">Step {n}: {NAME[from]} → {NAME[to]}</div>;
 
 function Working({ p }) {
   const T = useTheme();
   const lines = [];
-  if (p.type === "ea-dcm") {
-    lines.push(<>[Q] = R<sub>1</sub>(γ) R<sub>2</sub>(β) R<sub>3</sub>(α), multiplied out with the 3-2-1 matrix:</>);
-    lines.push(<Mat rows={p.Q} digits={4} color={(r) => T.axis[r]} />);
-  } else if (p.type === "dcm-ea") {
-    const Q = p.given.Q;
-    lines.push(<>β = sin⁻¹(−Q₁₃) = sin⁻¹({f(-Q[0][2])}) = <b>{f(p.ea.beta, 2)}°</b></>);
-    lines.push(<>α = atan2(Q₁₂, Q₁₁) = atan2({f(Q[0][1])}, {f(Q[0][0])}) → <b>{f(p.ea.alpha, 2)}°</b></>);
-    lines.push(<>γ = atan2(Q₂₃, Q₃₃) = atan2({f(Q[1][2])}, {f(Q[2][2])}) → <b>{f(p.ea.gamma, 2)}°</b></>);
-    lines.push(<span className="dim">α and γ are put between 0° and 360°.</span>);
-  } else if (p.type === "dcm-sar") {
-    const Q = p.given.Q, tr = Q[0][0] + Q[1][1] + Q[2][2];
-    const g = 2 * Math.sin(p.sar.theta * Math.PI / 180);
-    lines.push(<>θ = cos⁻¹((tr − 1)/2) = cos⁻¹(({f(tr)} − 1)/2) = <b>{f(p.sar.theta, 2)}°</b></>);
-    lines.push(<>γ = 2 sin θ = {f(g)}</>);
-    lines.push(<>u<sub>x</sub> = (Q₂₃ − Q₃₂)/γ = <b>{f(p.sar.u[0])}</b>, u<sub>y</sub> = (Q₃₁ − Q₁₃)/γ = <b>{f(p.sar.u[1])}</b>, u<sub>z</sub> = (Q₁₂ − Q₂₁)/γ = <b>{f(p.sar.u[2])}</b></>);
-  } else if (p.type === "sar-quat") {
-    const h = p.given.theta / 2, s = Math.sin(h * Math.PI / 180);
-    lines.push(<>θ/2 = {h}°, sin(θ/2) = {f(s)}, cos(θ/2) = {f(p.q[3])}</>);
-    lines.push(<>q = [ û sin(θ/2) ; cos(θ/2) ] = [ <b>{p.q.map((v) => f(v)).join(",  ")}</b> ]</>);
-  } else if (p.type === "quat-sar") {
-    const q = p.given.q, s = Math.sin(p.sar.theta * Math.PI / 360);
-    lines.push(<>θ = 2 cos⁻¹(q₄) = 2 cos⁻¹({f(q[3])}) = <b>{f(p.sar.theta, 2)}°</b></>);
-    lines.push(<>sin(θ/2) = {f(s)}, so û = (q₁, q₂, q₃)/sin(θ/2) = <b>({p.sar.u.map((v) => f(v)).join(", ")})</b></>);
-  } else if (p.type === "sar-dcm") {
-    lines.push(<>Plug û and θ into the SAR matrix:</>);
-    lines.push(<Mat rows={p.Q} digits={4} color={(r) => T.axis[r]} />);
+  const add = (arr) => lines.push(...arr);
+  const g = p.given;
+  switch (p.type) {
+    case "ea-dcm":
+      add(wkMatrix(p.Q, T, <>[Q] = R<sub>1</sub>(γ) R<sub>2</sub>(β) R<sub>3</sub>(α), multiplied out with the 3-2-1 matrix:</>));
+      break;
+    case "dcm-ea":
+      add(wkEA(g.Q, p.ea));
+      break;
+    case "dcm-sar":
+      add(wkSARfromQ(g.Q, p.sar));
+      break;
+    case "sar-quat":
+      add(wkQuatFromSAR({ u: g.u, theta: g.theta }, p.q));
+      break;
+    case "quat-sar":
+      add(wkSARfromQuat(g.q, p.sar));
+      break;
+    case "sar-dcm":
+      add(wkMatrix(p.Q, T, <>Plug û and θ into the SAR matrix:</>));
+      break;
+    /* with a stop in between */
+    case "ea-sar":
+      lines.push(stop(1, "euler", "dcm")); add(wkMatrix(p.Q, T, <>[Q] = R<sub>1</sub>(γ) R<sub>2</sub>(β) R<sub>3</sub>(α):</>));
+      lines.push(stop(2, "dcm", "sar")); add(wkSARfromQ(p.Q, p.sar));
+      break;
+    case "sar-ea":
+      lines.push(stop(1, "sar", "dcm")); add(wkMatrix(p.Q, T, <>Plug û and θ into the SAR matrix:</>));
+      lines.push(stop(2, "dcm", "euler")); add(wkEA(p.Q, p.ea));
+      break;
+    case "dcm-quat":
+      lines.push(stop(1, "dcm", "sar")); add(wkSARfromQ(g.Q, p.sar));
+      lines.push(stop(2, "sar", "quat")); add(wkQuatFromSAR(p.sar, p.q));
+      break;
+    case "quat-dcm":
+      lines.push(stop(1, "quat", "sar")); add(wkSARfromQuat(g.q, p.sar));
+      lines.push(stop(2, "sar", "dcm")); add(wkMatrix(p.Q, T, <>Plug û and θ into the SAR matrix:</>));
+      break;
+    case "ea-quat":
+      lines.push(stop(1, "euler", "dcm")); add(wkMatrix(p.Q, T, <>[Q] = R<sub>1</sub>(γ) R<sub>2</sub>(β) R<sub>3</sub>(α):</>));
+      lines.push(stop(2, "dcm", "sar")); add(wkSARfromQ(p.Q, p.sar));
+      lines.push(stop(3, "sar", "quat")); add(wkQuatFromSAR(p.sar, p.q));
+      break;
+    case "quat-ea":
+      lines.push(stop(1, "quat", "sar")); add(wkSARfromQuat(g.q, p.sar));
+      lines.push(stop(2, "sar", "dcm")); add(wkMatrix(p.Q, T, <>Plug û and θ into the SAR matrix:</>));
+      lines.push(stop(3, "dcm", "euler")); add(wkEA(p.Q, p.ea));
+      break;
+    default:
   }
   return <div className="working">{lines.map((l, i) => <div key={i}>{l}</div>)}</div>;
 }
 
 /* ============================================================================ */
 
+const randomType = (mode) => {
+  const pool = mode === "mix" ? TYPES : mode === "mix-jump" ? TYPES.filter((t) => t.via) : null;
+  return pool ? pool[Math.floor(Math.random() * pool.length)].key : mode;
+};
+
 export default function TestPrep() {
   const T = useTheme();
-  const [mode, setMode] = useState("mix");
-  const [p, setP] = useState(() => makeProblem(TYPES[Math.floor(Math.random() * TYPES.length)].key));
+  const [params, setParams] = useSearchParams();
+  // a link like ?p=ea-sar.k3j9x2 opens that exact problem
+  const [start] = useState(() => parseCode(params.get("p")));
+  const [mode, setMode] = useState(start ? start.type : "mix");
+  const [p, setP] = useState(() => (start ? problemFrom(start.type, start.seed) : problemFrom(randomType("mix"), newSeed())));
   const [ans, setAns] = useState({});
   const [checked, setChecked] = useState(null);
   const [showWork, setShowWork] = useState(false);
   const [tally, setTally] = useState(loadTally);
+  const [copied, setCopied] = useState(false);
+  const code = problemCode(p.type, p.seed);
 
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(tally)); } catch { /* fine */ } }, [tally]);
+  // keep the address bar on the problem you're looking at, so it can be shared
+  useEffect(() => {
+    if (params.get("p") !== code) setParams({ p: code }, { replace: true });
+  }, [code, params, setParams]);
 
   const next = useCallback((m = mode) => {
-    const type = m === "mix" ? TYPES[Math.floor(Math.random() * TYPES.length)].key : m;
-    setP(makeProblem(type));
+    setP(problemFrom(randomType(m), newSeed()));
     setAns({});
     setChecked(null);
     setShowWork(false);
+    setCopied(false);
   }, [mode]);
+
+  const copyLink = async () => {
+    const url = `${window.location.origin}/test-prep?p=${code}`;
+    try { await navigator.clipboard.writeText(url); setCopied(true); } catch { window.prompt("Copy this link:", url); }
+  };
 
   const check = () => {
     if (p.ask.every((fld) => String(ans[fld.id] ?? "").trim() === "")) {
@@ -131,13 +212,11 @@ export default function TestPrep() {
         <h1 style={{ fontSize: "clamp(32px, 4.4vw, 46px)" }}>Test Prep</h1>
         <p className="lede" style={{ margin: "10px 0 20px", maxWidth: 620 }}>
           New numbers every time. Work it on paper, type what you got, then check. The working is there if you
-          get stuck.
+          get stuck, and every problem has its own link if you want to show it to someone.
         </p>
 
-        <div className="type-row" role="group" aria-label="Problem type">
-          <button type="button" className={`step${mode === "mix" ? " on" : ""}`} style={{ "--c": T.primary }}
-            onClick={() => { setMode("mix"); next("mix"); }}>Mix it up</button>
-          {TYPES.map((t) => {
+        {(() => {
+          const btn = (t) => {
             const [r, n] = tally[t.key] || [0, 0];
             return (
               <button key={t.key} type="button" className={`step${mode === t.key ? " on" : ""}`}
@@ -146,12 +225,31 @@ export default function TestPrep() {
                 {n > 0 && <span className="faint tiny" style={{ marginLeft: 4 }}>{r}/{n}</span>}
               </button>
             );
-          })}
-        </div>
+          };
+          return (
+            <div className="type-groups">
+              <div className="type-row" role="group" aria-label="Mixed problems">
+                <button type="button" className={`step${mode === "mix" ? " on" : ""}`} style={{ "--c": T.primary }}
+                  onClick={() => { setMode("mix"); next("mix"); }}>Mix it up</button>
+                <button type="button" className={`step${mode === "mix-jump" ? " on" : ""}`} style={{ "--c": T.primary }}
+                  onClick={() => { setMode("mix-jump"); next("mix-jump"); }}>Mix the long ones</button>
+              </div>
+              <div className="type-row" role="group" aria-label="One-step problems">
+                <span className="type-lab">One step</span>
+                {TYPES.filter((t) => !t.via).map(btn)}
+              </div>
+              <div className="type-row" role="group" aria-label="Problems with a stop in between">
+                <span className="type-lab">With a stop in between</span>
+                {TYPES.filter((t) => t.via).map(btn)}
+              </div>
+            </div>
+          );
+        })()}
 
         <section className="card prob" style={{ "--c": T.rep[typeInfo.to] }}>
           <div className="prob-head">
             <span className="chip" style={{ "--c": T.rep[typeInfo.from] }}>{typeInfo.label}</span>
+            {isJump(p.type) && <span className="tag">{typeInfo.via.length === 1 ? "1 stop on the way" : `${typeInfo.via.length} stops on the way`}</span>}
             <span className="dim small">{PROMPT[p.type]}</span>
           </div>
           <Given p={p} />
@@ -193,6 +291,10 @@ export default function TestPrep() {
             <button type="button" className="btn" onClick={() => next()} style={{ marginLeft: "auto" }}>Next problem <Arrow size={16} /></button>
           </div>
           {showWork && <Working p={p} />}
+          <div className="prob-code">
+            <span className="faint small">Problem <code>{code}</code></span>
+            <button type="button" className="link-btn" onClick={copyLink}>{copied ? "Link copied" : "Copy link to this problem"}</button>
+          </div>
         </section>
 
         <div className="small dim" style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "space-between" }}>

@@ -5,7 +5,7 @@ import { useTheme, REPS } from "../../lib/theme.js";
 import { canonicalQuat, dcmToQuat } from "../../lib/attitude.js";
 import { EAToQ, QToSAR, quatToQ } from "../../lib/course.js";
 import { slerp } from "../../lib/director.js";
-import { Fig, M, Scene, Ask } from "./kit.jsx";
+import { Fig, M, Scene, Ask, H2 } from "./kit.jsx";
 import { Reset } from "../../components/Icons.jsx";
 
 const TILTED = canonicalQuat(dcmToQuat(EAToQ(40, 25, -20, [3, 2, 1])));
@@ -219,7 +219,7 @@ export default function Ch1() {
         Most of what a spacecraft is for depends on the second one.
       </p>
 
-      <h2>Two frames and the gap between them</h2>
+      <H2>Two frames and the gap between them</H2>
       <p>
         Attitude is always a comparison. You need a <b>reference frame</b> that stays put and a <b>body
         frame</b> fixed to the spacecraft. Attitude is how far, and which way, the body frame is turned
@@ -232,7 +232,7 @@ export default function Ch1() {
       </p>
       <ECI />
 
-      <h2>Why anyone cares</h2>
+      <H2>Why anyone cares</H2>
       <p>Pretty much every piece of hardware on a spacecraft has a direction it needs to point.</p>
       <Why />
       <p>
@@ -240,7 +240,7 @@ export default function Ch1() {
         the ground. Picking an attitude is picking which of them wins, and when.
       </p>
 
-      <h2>Attitude is not orbit</h2>
+      <H2>Attitude is not orbit</H2>
       <OrbitVsAttitude />
       <p>
         Orbit is translation: three numbers for where the centre of mass is. Attitude is rotation: three

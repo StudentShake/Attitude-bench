@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
 import { EAToQ, QToEA, QToSAR, SARToQuat, quatToSAR, SARToQ } from "../../lib/course.js";
 import NumField from "../../components/NumField.jsx";
-import { Fig, M, Mat, Ask, TeX } from "./kit.jsx";
+import { Fig, M, Mat, Ask, TeX, H2 } from "./kit.jsx";
 
 function Chain() {
   const T = useTheme();
@@ -131,7 +131,7 @@ export default function Ch6() {
       </p>
       <Chain />
 
-      <h2>One example, all the way around</h2>
+      <H2>One example, all the way around</H2>
       <p>
         A spacecraft finds its attitude as <M>α</M> = 30°, <M>β</M> = 20°, <M>γ</M> = 10° in a 3-2-1 sequence.
         Find the DCM, the SAR and the quaternion, then go back the other way to check. Each box feeds the next.

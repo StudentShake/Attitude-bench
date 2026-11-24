@@ -4,7 +4,7 @@ import { useTheme } from "../../lib/theme.js";
 import { canonicalQuat, normalizeQuat } from "../../lib/attitude.js";
 import { EAToQ, QToSAR, SARToQuat, fromCourseQuat, quatToQ } from "../../lib/course.js";
 import SequencePlayer from "../../components/SequencePlayer.jsx";
-import { Fig, M, Mat, Ask, Scene, TeX, SvgKey } from "./kit.jsx";
+import { Fig, M, Mat, Ask, Scene, TeX, SvgKey, H2 } from "./kit.jsx";
 import { ortho, arc3, path, fromAzEl, cross, norm, scale, add } from "./ortho.js";
 
 const serif = { fontFamily: "Times New Roman, serif", fontStyle: "italic", fontWeight: 700 };
@@ -64,6 +64,10 @@ function AxisPicture() {
           <div className="pic-title" style={{ color: T.text }}>Its components</div>
           <svg viewBox="0 0 300 270" role="img" aria-label="The axis u with its x, y and z components">
             <Axes V={V} T={T} />
+            {/* the box the shadows make, faint, as in the DCM chapter */}
+            {[[V.P([u[0], u[1], 0]), V.P([u[0], 0, 0])], [V.P([u[0], u[1], 0]), V.P([0, u[1], 0])], [V.P([u[0], u[1], 0]), uT]].map(([a, b], i) => (
+              <line key={`box${i}`} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke={T.line} strokeWidth="1.5" />
+            ))}
             {AX.map((e, i) => {
               const f = V.P(scale(e, u[i]));
               const dir = [f[0] - V.O[0], f[1] - V.O[1]];
@@ -373,21 +377,21 @@ export default function Ch4() {
       </p>
       <AxisPicture />
 
-      <h2>θ is a turn, not a gap between two arrows</h2>
+      <H2>θ is a turn, not a gap between two arrows</H2>
       <p>
         Most angles you&apos;ve met sit between two arrows. θ is different: it&apos;s how far things spin <i>around</i> û.
         The easy way to see it is to build an SAR from scratch, the same way you&apos;d find a city on a globe.
       </p>
       <ThetaBuilder />
 
-      <h2>Why û is the same in either frame</h2>
+      <H2>Why û is the same in either frame</H2>
       <p>
         Points on the axis don&apos;t move during the turn. So whatever û looked like before the turn, it looks the
         same after, and its components in the old frame and the new frame are equal.
       </p>
       <SameInBoth />
 
-      <h2>From û and θ to [Q]</h2>
+      <H2>From û and θ to [Q]</H2>
       <TeX block>{String.raw`[Q] = \begin{bmatrix} u_x^2(1-c\theta)+c\theta & u_xu_y(1-c\theta)+u_z s\theta & u_xu_z(1-c\theta)-u_y s\theta \\ u_xu_y(1-c\theta)-u_z s\theta & u_y^2(1-c\theta)+c\theta & u_yu_z(1-c\theta)+u_x s\theta \\ u_xu_z(1-c\theta)+u_y s\theta & u_yu_z(1-c\theta)-u_x s\theta & u_z^2(1-c\theta)+c\theta \end{bmatrix}`}</TeX>
       <p>
         Four numbers, but only three are free, because <TeX>{String.raw`u_x^2+u_y^2+u_z^2=1`}</TeX>. It looks like a lot,
@@ -396,7 +400,7 @@ export default function Ch4() {
       <SarToQ />
       <p><Link className="link" to="/tutorial/the-math#sar-to-q">Where does this matrix come from? →</Link></p>
 
-      <h2>From [Q] back to û and θ</h2>
+      <H2>From [Q] back to û and θ</H2>
       <p>The angle comes from the diagonal and the axis from the differences across it:</p>
       <TeX block>{String.raw`\theta = \cos^{-1}\!\left(\frac{Q_{11}+Q_{22}+Q_{33}-1}{2}\right) \qquad \hat u = \frac{1}{2\sin\theta}\begin{bmatrix} Q_{23}-Q_{32} \\ Q_{31}-Q_{13} \\ Q_{12}-Q_{21} \end{bmatrix}`}</TeX>
       <Worked />
