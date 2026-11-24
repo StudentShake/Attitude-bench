@@ -98,6 +98,7 @@ export default function AttitudeBench() {
   const [craft, setCraft] = useState("solid");
   const [showCards, setShowCards] = usePref("cards", { dcm: true, euler: true, sar: true, quat: true });
   const [dock, setDock] = usePref("dock", "side");
+  const toggleCard = (k) => setShowCards((c) => ({ ...c, [k]: !c[k] }));
   const [showSAR, setShowSAR] = useState(true);
   const [hidden, setHidden] = useState({ dcm: false, euler: false, sar: false, quat: false });
   const [flipSign, setFlipSign] = useState(false);
@@ -293,11 +294,11 @@ export default function AttitudeBench() {
       </div>
 
       <div className="pg-tools">
-        <div className="pg-tool" role="group" aria-label="Which cards to show">
+        <div className="pg-tool" role="group" aria-label="Which cards are open">
           <span className="faint small">Cards</span>
           {REPS.map((r) => (
             <button key={r.key} type="button" className="toggle" aria-pressed={showCards[r.key]}
-              style={{ "--c": T.rep[r.key] }} onClick={() => setShowCards((c) => ({ ...c, [r.key]: !c[r.key] }))}>
+              style={{ "--c": T.rep[r.key] }} onClick={() => toggleCard(r.key)}>
               <span className="sw" /> <span className="m">{r.symbol}</span>
             </button>
           ))}
@@ -320,7 +321,7 @@ export default function AttitudeBench() {
               quat={shown} onDrag={onDrag} highlight={highlight} showInertial={showInertial} showBody={showBody} craft={craft}
               sar={sarProp} ghosts={ghosts} spin={spin} onInteract={interact} projections={projections}
             />
-            {dock === "scene" && <SceneReadouts show={showCards} Q={Q} ea={ea} sar={sar} qc={qc} seq={seq} T={T} />}
+            {dock === "scene" && <SceneReadouts show={showCards} onToggle={toggleCard} Q={Q} ea={ea} sar={sar} qc={qc} seq={seq} T={T} />}
             <div className="scene-ui" style={{ left: 12, top: 12 }}>
               <button type="button" className="btn sm" onClick={() => glideTo(IDENTITY)}
                 title="Line the body frame back up with the inertial frame">
@@ -369,7 +370,7 @@ export default function AttitudeBench() {
         {dock !== "scene" && <div className="pg-cards">
 
           {/* DCM */}
-          {showCards.dcm && <RepCard rep="dcm" symbol="[Q]" title="Direction cosine matrix"
+          <RepCard rep="dcm" open={showCards.dcm} onToggle={() => toggleCard("dcm")} symbol="[Q]" title="Direction cosine matrix"
             note={<>Maps inertial to body: <span className="m">v</span>|<sub>B</sub> = [Q] <span className="m">v</span>|<sub>I</sub></>}
             hidden={hidden.dcm} onHide={(h) => setHidden((s) => ({ ...s, dcm: h }))}>
             <Spoiler hidden={hidden.dcm} resetKey={resetKey}>
@@ -395,10 +396,10 @@ export default function AttitudeBench() {
                 ? "That's not a rotation matrix yet, so the spacecraft shows the closest one. Keep typing."
                 : "Each row is one body axis written in inertial coordinates. Tap a row's label to see where its three numbers sit on the spacecraft."}
             </p>
-          </RepCard>}
+          </RepCard>
 
           {/* Euler angles */}
-          {showCards.euler && <RepCard rep="euler" symbol="α β γ" title="Euler angles"
+          <RepCard rep="euler" open={showCards.euler} onToggle={() => toggleCard("euler")} symbol="α β γ" title="Euler angles"
             note={<>Sequence {seqName(seq)}{SEQ_NICKNAME[seqName(seq)] ? ` (${SEQ_NICKNAME[seqName(seq)]})` : ""}</>}
             hidden={hidden.euler} onHide={(h) => setHidden((s) => ({ ...s, euler: h }))}>
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
@@ -455,10 +456,10 @@ export default function AttitudeBench() {
                   onClose={() => setAnim(null)} />
               )}
             </div>
-          </RepCard>}
+          </RepCard>
 
           {/* SAR */}
-          {showCards.sar && <RepCard rep="sar" symbol="û, θ" title="Single-axis rotation"
+          <RepCard rep="sar" open={showCards.sar} onToggle={() => toggleCard("sar")} symbol="û, θ" title="Single-axis rotation"
             note="One turn of θ about the Euler axis û"
             hidden={hidden.sar} onHide={(h) => setHidden((s) => ({ ...s, sar: h }))}>
             <Spoiler hidden={hidden.sar} resetKey={resetKey}>
@@ -508,10 +509,10 @@ export default function AttitudeBench() {
                 </div>
               )}
             </div>
-          </RepCard>}
+          </RepCard>
 
           {/* Quaternion */}
-          {showCards.quat && <RepCard rep="quat" symbol="q" title="Quaternion"
+          <RepCard rep="quat" open={showCards.quat} onToggle={() => toggleCard("quat")} symbol="q" title="Quaternion"
             note={<>Scalar last: <span className="m">q</span> = [ <span className="m">û</span> sin(<span className="m">θ</span>/2) ; cos(<span className="m">θ</span>/2) ]</>}
             hidden={hidden.quat} onHide={(h) => setHidden((s) => ({ ...s, quat: h }))}>
             <Spoiler hidden={hidden.quat} resetKey={resetKey}>
@@ -548,7 +549,7 @@ export default function AttitudeBench() {
                 {flipSign ? "Every sign flipped and the spacecraft didn't move. q and −q are the same attitude." : "Try it and watch the spacecraft."}
               </span>
             </div>
-          </RepCard>}
+          </RepCard>
           {!REPS.some((r) => showCards[r.key]) && (
             <p className="dim small" style={{ padding: 8 }}>All cards are hidden. Turn one on above.</p>
           )}
@@ -578,37 +579,30 @@ function RowCells({ r, Q, T, on, onToggle, onCommit }) {
 }
 
 /** Compact, read-only numbers floated on the scene (the "On the scene" layout). */
-function SceneReadouts({ show, Q, ea, sar, qc, seq, T }) {
+function SceneReadouts({ show, onToggle, Q, ea, sar, qc, seq, T }) {
   const f = (v, p = 3) => fmt(v, p);
+  const item = (key, tag, body) => (
+    <div className={`ro${show[key] ? "" : " closed"}`} style={{ "--c": T.rep[key] }}>
+      <button type="button" className="ro-tag" aria-expanded={show[key]} onClick={() => onToggle(key)}
+        title={show[key] ? "Fold up" : "Open"}>{tag}</button>
+      {show[key] && body}
+    </div>
+  );
   return (
     <div className="readouts">
-      {show.dcm && (
-        <div className="ro" style={{ "--c": T.rep.dcm }}>
-          <span className="ro-tag">[Q]</span>
-          <span className="ro-mat">
-            {Q.map((row, r) => row.map((v, c) => <span key={`${r}${c}`} style={{ color: `color-mix(in srgb, ${T.axis[r]} 75%, var(--text))` }}>{f(v)}</span>))}
-          </span>
-        </div>
-      )}
-      {show.euler && (
-        <div className="ro" style={{ "--c": T.rep.euler }}>
-          <span className="ro-tag">α β γ</span>
+      {item("dcm", "[Q]", (
+        <span className="ro-mat">
+          {Q.map((row, r) => row.map((v, c) => <span key={`${r}${c}`} style={{ color: `color-mix(in srgb, ${T.axis[r]} 75%, var(--text))` }}>{f(v)}</span>))}
+        </span>
+      ))}
+      {item("euler", "α β γ", (
+        <>
           <span className="num">{f(ea.alpha, 1)}° {f(ea.beta, 1)}° {f(ea.gamma, 1)}°</span>
           <span className="faint tiny">{seqName(seq)}</span>
-        </div>
-      )}
-      {show.sar && (
-        <div className="ro" style={{ "--c": T.rep.sar }}>
-          <span className="ro-tag">û, θ</span>
-          <span className="num">{sar.u ? `(${sar.u.map((v) => f(v)).join(", ")})` : "—"}  {f(sar.theta, 1)}°</span>
-        </div>
-      )}
-      {show.quat && (
-        <div className="ro" style={{ "--c": T.rep.quat }}>
-          <span className="ro-tag">q</span>
-          <span className="num">{qc.map((v) => f(v)).join("  ")}</span>
-        </div>
-      )}
+        </>
+      ))}
+      {item("sar", "û, θ", <span className="num">{sar.u ? `(${sar.u.map((v) => f(v)).join(", ")})` : "—"}  {f(sar.theta, 1)}°</span>)}
+      {item("quat", "q", <span className="num">{qc.map((v) => f(v)).join("  ")}</span>)}
     </div>
   );
 }

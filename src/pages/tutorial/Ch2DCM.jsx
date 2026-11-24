@@ -8,6 +8,16 @@ import { Fig, M, Mat, Scene, Ask, TeX, MathFlow } from "./kit.jsx";
 
 const serif = { fontFamily: "Times New Roman, serif", fontStyle: "italic", fontWeight: 700 };
 const sans = { fontFamily: "var(--sans)" };
+/* text with a halo in the card colour, so a label stays readable if a line runs behind it */
+const halo = (T) => ({ paintOrder: "stroke", stroke: T.card, strokeWidth: 5, strokeLinejoin: "round" });
+/* angle (radians) for a new-axis label: pushed clear of the old axis labels at 0° and 90° */
+const clearOf = (t, olds = [0, Math.PI / 2], gap = 0.24) => {
+  for (const o of olds) {
+    const d = Math.atan2(Math.sin(t - o), Math.cos(t - o));
+    if (Math.abs(d) < gap) return o + (d >= 0 ? gap : -gap);
+  }
+  return t;
+};
 
 /* ---------- 1. one number = one shadow ---------- */
 
@@ -15,14 +25,24 @@ function Shadow() {
   const T = useTheme();
   const [deg, setDeg] = useState(35);
   const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
-  const O = [200, 190], L = 140;
+  const O = [200, 182], L = 128;
   const P = (x, y) => [O[0] + x * L, O[1] - y * L];
   const tip = P(c, s), foot = P(c, 0), footY = P(0, s);
   const sq = 10 * Math.sign(c || 1);
+  // x′ label sits past the tip, nudged off the old x and y labels
+  const tx = clearOf(a);
+  const midA = Math.sign(a || 1) * Math.max(Math.abs(a) / 2, 0.35);
+  const xl = P(1.2 * Math.cos(tx), 1.2 * Math.sin(tx));
+  // Q11 sits on the other side of the x axis from the tip; Q12 on the other side of the y axis.
+  const up = s >= 0 ? 1 : -1, right = c >= 0 ? 1 : -1;
+  const q11 = { x: O[0] + 14 * right, y: up > 0 ? O[1] + 28 : O[1] - 16, anchor: right > 0 ? "start" : "end" };
+  // when the tip is on the left, the θ arc owns the right-hand side near the x axis, so lift Q12 clear of it
+  const q12h = right > 0 ? Math.max((Math.abs(s) * L) / 2, 20) : Math.max(Math.abs(s) * L, 80);
+  const q12 = { x: O[0] - 14 * right, y: O[1] - up * q12h + 5, anchor: right > 0 ? "end" : "start" };
   return (
     <Fig caption="Drop a line from the tip of the new axis straight down onto an old axis, meeting it at a right angle. The length of that shadow is the number in [Q]. It's the cosine of the angle between them, so it runs from −1 to 1 and goes negative when the new axis points backwards.">
       <div className="panel">
-        <svg viewBox="0 0 600 300" role="img" aria-label={`A unit-length new axis at ${deg} degrees from the old x axis, with its shadows on the old x and y axes`}>
+        <svg viewBox="0 0 600 350" role="img" aria-label={`A unit-length new axis at ${deg} degrees from the old x axis, with its shadows on the old x and y axes`}>
           <line x1={P(-1.2, 0)[0]} y1={O[1]} x2={P(1.25, 0)[0]} y2={O[1]} stroke={T.axis[0]} strokeWidth="2.5" strokeDasharray="7 5" />
           <line x1={O[0]} y1={P(0, -0.25)[1]} x2={O[0]} y2={P(0, 1.2)[1]} stroke={T.axis[1]} strokeWidth="2.5" strokeDasharray="7 5" />
           <text x={P(1.27, 0)[0]} y={O[1] + 7} fill={T.axis[0]} fontSize="22" style={serif}>x</text>
@@ -39,11 +59,11 @@ function Shadow() {
           {/* the new axis */}
           <line x1={O[0]} y1={O[1]} x2={tip[0]} y2={tip[1]} stroke={T.rep.dcm} strokeWidth="5" strokeLinecap="round" />
           <circle cx={tip[0]} cy={tip[1]} r="6" fill={T.rep.dcm} />
-          <text x={tip[0] + 10} y={tip[1] - 6} fill={T.rep.dcm} fontSize="22" style={serif}>x′</text>
+          <text x={xl[0]} y={xl[1] + 8} textAnchor="middle" fill={T.rep.dcm} fontSize="22" style={{ ...serif, ...halo(T) }}>x′</text>
           <path d={`M${O[0] + 38} ${O[1]} A38 38 0 0 ${s >= 0 ? 0 : 1} ${O[0] + 38 * c} ${O[1] - 38 * s}`} fill="none" stroke={T.primary} strokeWidth="3" />
-          <text x={O[0] + 46 * Math.cos(a / 2)} y={O[1] - 46 * Math.sin(a / 2) + 6} fill={T.primary} fontSize="18" style={serif}>θ</text>
-          <text x={(O[0] + foot[0]) / 2} y={O[1] + 30} textAnchor="middle" fill={T.axis[0]} fontSize="15" style={{ ...sans, fontWeight: 700 }}>Q₁₁ = cos θ = {c.toFixed(2)}</text>
-          <text x={O[0] - 12} y={(O[1] + footY[1]) / 2 + 5} textAnchor="end" fill={T.axis[1]} fontSize="15" style={{ ...sans, fontWeight: 700 }}>Q₁₂ = {s.toFixed(2)}</text>
+          <text x={O[0] + 50 * Math.cos(midA)} y={O[1] - 50 * Math.sin(midA) + 6} textAnchor="middle" fill={T.primary} fontSize="18" style={{ ...serif, ...halo(T) }}>θ</text>
+          <text x={q11.x} y={q11.y} textAnchor={q11.anchor} fill={T.axis[0]} fontSize="15" style={{ ...sans, fontWeight: 700, ...halo(T) }}>Q₁₁ = cos θ = {c.toFixed(2)}</text>
+          <text x={q12.x} y={q12.y} textAnchor={q12.anchor} fill={T.axis[1]} fontSize="15" style={{ ...sans, fontWeight: 700, ...halo(T) }}>Q₁₂ = {s.toFixed(2)}</text>
           <g style={sans} fontSize="14" fill={T.dim}>
             <text x="392" y="70" fill={T.text} fontWeight="700">New axis: length 1</text>
             <text x="392" y="94">shadow on x = cos θ</text>
@@ -73,7 +93,8 @@ function Cosines() {
   const line = (a, b, props) => <line x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} {...props} />;
   const feet = [P(k[0], 0, 0), P(0, k[1], 0), P(0, 0, k[2])];
   const lab = ["Q₃₁", "Q₃₂", "Q₃₃"];
-  const off = [[14, 6], [8, 24], [-98, 6]];
+  const off = [[10, 30], [8, 26], [-14, 6]];
+  const anchor = ["start", "start", "end"];
   return (
     <Fig caption="In 3-D you get three shadows, one on each old axis. For the new z axis those three numbers are row 3 of [Q]. Do the same for the new x and y axes and you have all nine.">
       <div className="panel">
@@ -95,12 +116,12 @@ function Cosines() {
               {line(o, f, { stroke: T.axis[i], strokeWidth: 8, strokeLinecap: "round", opacity: 0.85 })}
               {line(kp, f, { stroke: T.dim, strokeWidth: 1.8, strokeDasharray: "4 4" })}
               <circle cx={f[0]} cy={f[1]} r="5.5" fill={T.axis[i]} />
-              <text x={f[0] + off[i][0]} y={f[1] + off[i][1]} fill={T.axis[i]} fontSize="16" style={{ ...sans, fontWeight: 700 }}>{lab[i]} = {k[i].toFixed(2)}</text>
+              <text x={f[0] + off[i][0]} y={f[1] + off[i][1]} textAnchor={anchor[i]} fill={T.axis[i]} fontSize="16" style={{ ...sans, fontWeight: 700, ...halo(T) }}>{lab[i]} = {k[i].toFixed(2)}</text>
             </g>
           ))}
           {line(o, kp, { stroke: T.rep.dcm, strokeWidth: 5, strokeLinecap: "round" })}
           <circle cx={kp[0]} cy={kp[1]} r="6" fill={T.rep.dcm} />
-          <text x={kp[0] + 10} y={kp[1] - 6} fill={T.rep.dcm} fontSize="22" style={serif}>z′</text>
+          <text x={kp[0] + 10} y={kp[1] - 6} fill={T.rep.dcm} fontSize="22" style={{ ...serif, ...halo(T) }}>z′</text>
           <g style={sans} fontSize="14" fill={T.dim}>
             <text x="420" y="78" fill={T.text} fontWeight="700">Row 3 of [Q]</text>
             <text x="420" y="102">= z′ written in x, y, z</text>
@@ -273,9 +294,19 @@ function Elementary() {
   const [h, v] = PLANE[axis];
   const a = axis - 1;
   const c = Math.cos((phi * Math.PI) / 180), s = Math.sin((phi * Math.PI) / 180);
-  const C0 = [180, 160], L = 115;
+  const C0 = [180, 165], L = 115;
   const pt = (x, y) => [C0[0] + x * L, C0[1] - y * L];
   const hp = pt(c, s), vp = pt(-s, c), hFoot = pt(c, 0);
+  // new-axis labels sit just past each tip, pushed clear of the old axis labels
+  const r = (phi * Math.PI) / 180;
+  const lp = (t) => { const u = clearOf(t); return pt(1.24 * Math.cos(u), 1.24 * Math.sin(u)); };
+  const hl = lp(r), vl = lp(r + Math.PI / 2);
+  const right = c >= 0 ? 1 : -1;
+  const midA = Math.sign(phi || 1) * Math.max(Math.abs(r) / 2, 0.35); // φ label: off the cos bar for small turns
+  // a short sin bar would put its label on top of the new axis label, so tuck it inside, just past the tip
+  const sinAt = Math.abs(s) < 0.3
+    ? { x: hFoot[0] - 14 * right, y: hp[1] - (s >= 0 ? 16 : -26), anchor: right > 0 ? "end" : "start" }
+    : { x: hFoot[0] + 12 * right, y: (C0[1] + hp[1]) / 2 + 5, anchor: right > 0 ? "start" : "end" };
 
   return (
     <Fig caption="Drag the slider. The old axis you turn about points out of the screen and doesn't move. The other two turn by φ, and each new axis casts a cos φ shadow and a sin φ shadow on the old ones. Those are the entries of the matrix.">
@@ -291,7 +322,7 @@ function Elementary() {
           <CornerTriad axis={axis} />
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-          <svg viewBox="0 0 360 300" style={{ flex: "1 1 260px", maxWidth: 400 }} role="img"
+          <svg viewBox="0 0 360 322" style={{ flex: "1 1 260px", maxWidth: 400 }} role="img"
             aria-label={`Turn of ${phi} degrees about the ${NAME[a]} axis`}>
             <line x1={pt(-1.15, 0)[0]} y1={C0[1]} x2={pt(1.15, 0)[0]} y2={C0[1]} stroke={T.axis[h]} strokeWidth="2.5" strokeDasharray="7 5" />
             <line x1={C0[0]} y1={pt(0, -1.15)[1]} x2={C0[0]} y2={pt(0, 1.15)[1]} stroke={T.axis[v]} strokeWidth="2.5" strokeDasharray="7 5" />
@@ -300,22 +331,22 @@ function Elementary() {
             {/* the right triangle under the new h axis */}
             <line x1={C0[0]} y1={C0[1]} x2={hFoot[0]} y2={C0[1]} stroke={T.rep.dcm} strokeWidth="8" strokeLinecap="round" opacity=".8" />
             <line x1={hFoot[0]} y1={C0[1]} x2={hp[0]} y2={hp[1]} stroke={T.rep.quat} strokeWidth="8" strokeLinecap="round" opacity=".8" />
-            <text x={(C0[0] + hFoot[0]) / 2} y={C0[1] + (s >= 0 ? 26 : -14)} textAnchor="middle" fill={T.rep.dcm} fontSize="15" style={{ ...sans, fontWeight: 800 }}>cos φ</text>
-            <text x={hFoot[0] + (c >= 0 ? 10 : -10)} y={(C0[1] + hp[1]) / 2 + 5} textAnchor={c >= 0 ? "start" : "end"} fill={T.rep.quat} fontSize="15" style={{ ...sans, fontWeight: 800 }}>sin φ</text>
+            <text x={C0[0] + 14 * right} y={C0[1] + (s >= 0 ? 26 : -14)} textAnchor={right > 0 ? "start" : "end"} fill={T.rep.dcm} fontSize="15" style={{ ...sans, fontWeight: 800, ...halo(T) }}>cos φ</text>
+            <text x={sinAt.x} y={sinAt.y} textAnchor={sinAt.anchor} fill={T.rep.quat} fontSize="15" style={{ ...sans, fontWeight: 800, ...halo(T) }}>sin φ</text>
             {/* rotated axes */}
             <line x1={C0[0]} y1={C0[1]} x2={hp[0]} y2={hp[1]} stroke={T.axis[h]} strokeWidth="4.5" strokeLinecap="round" />
             <line x1={C0[0]} y1={C0[1]} x2={vp[0]} y2={vp[1]} stroke={T.axis[v]} strokeWidth="4.5" strokeLinecap="round" />
-            <text x={hp[0] + 8} y={hp[1] - 4} fill={T.axis[h]} fontSize="20" style={serif}>{NAME[h]}′</text>
-            <text x={vp[0] + (vp[0] < C0[0] ? -22 : 6)} y={vp[1] - 6} fill={T.axis[v]} fontSize="20" style={serif}>{NAME[v]}′</text>
+            <text x={hl[0]} y={hl[1] + 7} textAnchor="middle" fill={T.axis[h]} fontSize="20" style={{ ...serif, ...halo(T) }}>{NAME[h]}′</text>
+            <text x={vl[0]} y={vl[1] + 7} textAnchor="middle" fill={T.axis[v]} fontSize="20" style={{ ...serif, ...halo(T) }}>{NAME[v]}′</text>
             <path d={`M${C0[0] + 34} ${C0[1]} A34 34 0 0 ${phi >= 0 ? 0 : 1} ${C0[0] + 34 * c} ${C0[1] - 34 * s}`} fill="none" stroke={T.primary} strokeWidth="3" />
-            <text x={C0[0] + 44 * Math.cos((phi * Math.PI) / 360)} y={C0[1] - 44 * Math.sin((phi * Math.PI) / 360) + 6} fill={T.primary} fontSize="18" style={serif}>φ</text>
+            <text x={C0[0] + 46 * Math.cos(midA)} y={C0[1] - 46 * Math.sin(midA) + 6} textAnchor="middle" fill={T.primary} fontSize="18" style={{ ...serif, ...halo(T) }}>φ</text>
             <circle cx={C0[0]} cy={C0[1]} r="9" fill={T.card} stroke={T.axis[a]} strokeWidth="2.5" />
             <circle cx={C0[0]} cy={C0[1]} r="3.2" fill={T.axis[a]} />
           </svg>
           <div style={{ flex: "1 1 220px", textAlign: "center" }}>
             <TeX>{`[R_${axis}(${phi}^\\circ)] =`}</TeX>
             <div style={{ marginTop: 8 }}><Mat rows={R} digits={3} color={(r) => T.axis[r]} /></div>
-            <div className="tiny dim" style={{ marginTop: 10 }}>Row <M>i</M> is new axis <M>i</M>. The <M>{NAME[a]}</M> row and column stay 0, 0, 1.</div>
+            <div className="tiny dim" style={{ marginTop: 10 }}>Row <M>i</M> is new axis <M>i</M>. The <M>{NAME[a]}</M> row and column stay all 0, with a 1 where they cross.</div>
           </div>
         </div>
         <input type="range" className="slider" min={-180} max={180} step={1} value={phi}

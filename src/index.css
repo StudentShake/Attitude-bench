@@ -171,7 +171,8 @@ input[type="range"].slider { width: 100%; accent-color: var(--c, var(--primary))
 
 /* ---------- 3D viewport ---------- */
 
-.vp-mount { position: relative; width: 100%; height: 100%; }
+.vp-mount { position: relative; width: 100%; height: 100%; min-width: 0; overflow: hidden; }
+.vp-mount > canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
 .vp-gizmo { position: absolute; left: 8px; bottom: 8px; width: 100px; height: 100px; user-select: none; z-index: 2; }
 .vp-gizmo svg { display: block; overflow: visible; }
 .vp-gizmo-bg { fill: color-mix(in srgb, var(--card) 78%, transparent); stroke: var(--line); stroke-width: 1.5; }
@@ -580,3 +581,22 @@ label.blk { display: block; margin-top: 6px; }
 .chap.math .chap-n { font-size: 17px; font-family: var(--serif, "Times New Roman"); }
 .chap.math.on .chap-n { color: var(--bg); }
 @media (max-width: 900px) { .tut-side .chap.math { margin-top: 0; border-top: 1.5px solid var(--line); border-radius: 999px; padding-top: 6px; } }
+.sarq-given { display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center; font-family: var(--mono); font-size: 14px; margin-bottom: 12px; }
+/* cards fold up to their header; the badge is the dropdown */
+.rep-toggle {
+  display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 0; margin: 0;
+  background: none; border: 0; color: inherit; font: inherit; cursor: pointer; text-align: left;
+}
+.rep-toggle .rep-badge { display: inline-flex; align-items: center; gap: 4px; flex: none; transition: transform .12s; }
+.rep-toggle:hover .rep-badge { transform: translateY(-1px); }
+.rep-toggle:focus-visible { outline: 2px solid var(--c); outline-offset: 4px; border-radius: 12px; }
+.rep-chev { transition: transform .18s; transform: rotate(-90deg); }
+.rep-chev.open { transform: rotate(0deg); }
+.rep.closed .rep-head { border-bottom: 0; }
+.ro .ro-tag { border: 0; cursor: pointer; pointer-events: auto; }
+.ro.closed { padding: 4px; }
+.hero h1.sad { font-size: clamp(38px, 5.2vw, 60px); line-height: 1.04; }
+.hero h1.sad > span { display: block; }
+.hero h1.sad b { color: var(--primary); font-weight: inherit; }
+[data-theme="light"] .hero h1.sad b { color: #C98A00; }
+.hero h1.sad .hl { margin-top: 6px; }

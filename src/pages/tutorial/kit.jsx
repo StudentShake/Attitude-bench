@@ -116,3 +116,17 @@ export function MathFlow({ steps, tone = "primary", reveal = true }) {
     </div>
   );
 }
+
+/** A small colour key drawn inside an SVG, for pictures where labels on the lines would crowd. */
+export function SvgKey({ x = 10, y = 18, items, text }) {
+  return (
+    <g fontFamily="var(--sans)" fontSize="13" fontWeight="800">
+      {items.map((it, i) => (
+        <g key={it.label} transform={`translate(${x} ${y + i * 20})`}>
+          <line x1="0" y1="-4" x2="20" y2="-4" stroke={it.color} strokeWidth="3.5" strokeLinecap="round" strokeDasharray={it.dash || undefined} />
+          <text x="27" y="0" fill={text || it.color}>{it.label}</text>
+        </g>
+      ))}
+    </g>
+  );
+}

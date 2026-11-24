@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
-import { Fig, M, TeX, MathFlow } from "./kit.jsx";
+import { Fig, M, TeX, MathFlow, SvgKey } from "./kit.jsx";
 import { ortho, arc3, path, fromAzEl, cross, scale, add } from "./ortho.js";
 
 /* ============================================================================
@@ -49,8 +49,7 @@ function Builder() {
     "Row 2 has to be at right angles to row 1, so its tip must sit on the dashed circle. Only 1 number left: where on the circle.",
     "Row 3 has nothing left to choose. It's row 1 × row 2.",
   ];
-  const azLab = V.P(fromAzEl(az / 2, 0).map((v) => v * 0.62));
-  const elLab = V.P(add(scale(h, 0.6 * Math.cos((el * Math.PI) / 360)), [0, 0, 0.6 * Math.sin((el * Math.PI) / 360)]));
+  const AZ = T.rep.euler, EL = T.rep.quat;
   return (
     <Fig caption="Build a DCM by hand. Row 1 costs two free numbers, row 2 costs one, row 3 costs none. That's 2 + 1 + 0 = 3.">
       <div className="panel">
@@ -75,12 +74,11 @@ function Builder() {
             })}
             {stage === 1 && (
               <g>
-                <path d={path(azArc)} fill="none" stroke={T.primary} strokeWidth="3" />
-                <path d={path(elArc)} fill="none" stroke={T.rep.quat} strokeWidth="3" />
+                <path d={path(azArc)} fill="none" stroke={AZ} strokeWidth="3.5" />
+                <path d={path(elArc)} fill="none" stroke={EL} strokeWidth="3.5" />
                 <line x1={O[0]} y1={O[1]} x2={foot[0]} y2={foot[1]} stroke={T.faint} strokeWidth="1.5" />
                 <line x1={V.P(r1)[0]} y1={V.P(r1)[1]} x2={foot[0]} y2={foot[1]} stroke={T.faint} strokeWidth="1.5" strokeDasharray="3 4" />
-                <text x={azLab[0]} y={azLab[1] + 16} textAnchor="middle" fill={T.primary} fontSize="12.5" style={{ fontFamily: "var(--sans)", fontWeight: 800 }}>azimuth</text>
-                <text x={elLab[0] - 10} y={elLab[1] - 4} textAnchor="end" fill={T.rep.quat} fontSize="12.5" style={{ fontFamily: "var(--sans)", fontWeight: 800 }}>elevation</text>
+                <SvgKey x={8} y={20} items={[{ color: AZ, label: "azimuth" }, { color: EL, label: "elevation" }]} />
               </g>
             )}
             {stage >= 2 && <path d={path(circ)} fill="none" stroke={T.axis[1]} strokeWidth="2.5" strokeDasharray="6 5" opacity=".85" />}
@@ -100,10 +98,10 @@ function Builder() {
             <p className="small" style={{ marginTop: 12 }}>{why[stage - 1]}</p>
             {stage === 1 && (
               <>
-                <label className="blk"><span className="lbl" style={{ color: T.primary }}>free number 1: azimuth (longitude) {az}°</span>
-                  <input type="range" className="slider" min={-180} max={180} value={az} onChange={(e) => setAz(+e.target.value)} style={{ "--c": T.primary }} /></label>
-                <label className="blk"><span className="lbl" style={{ color: T.rep.quat }}>free number 2: elevation (latitude) {el}°</span>
-                  <input type="range" className="slider" min={-85} max={85} value={el} onChange={(e) => setEl(+e.target.value)} style={{ "--c": T.rep.quat }} /></label>
+                <label className="blk"><span className="lbl" style={{ color: AZ }}>free number 1: azimuth (longitude) {az}°</span>
+                  <input type="range" className="slider" min={-180} max={180} value={az} onChange={(e) => setAz(+e.target.value)} style={{ "--c": AZ }} /></label>
+                <label className="blk"><span className="lbl" style={{ color: EL }}>free number 2: elevation (latitude) {el}°</span>
+                  <input type="range" className="slider" min={-85} max={85} value={el} onChange={(e) => setEl(+e.target.value)} style={{ "--c": EL }} /></label>
               </>
             )}
             {stage === 2 && (

@@ -1,11 +1,13 @@
 import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTheme } from "../../lib/theme.js";
-import { SARToQuat, EAToQ } from "../../lib/course.js";
+import { SARToQuat, EAToQ, QToSAR } from "../../lib/course.js";
 import { dcmToQuat, canonicalQuat, mul } from "../../lib/attitude.js";
 import { Fig, M, TeX, Mat, Scene } from "./kit.jsx";
 
-const U = [0.124015, 0.615638, 0.778209]; // the axis for α 30°, β 20°, γ 10° (3-2-1)
+// same example as the single-axis chapter: α 50°, β 10°, γ 40° (3-2-1), whose axis has three easy-to-see parts
+const U = QToSAR(EAToQ(50, 10, 40, [3, 2, 1])).u;
+const halo = (T) => ({ paintOrder: "stroke", stroke: T.card, strokeWidth: 5, strokeLinejoin: "round" });
 
 function HalfAngle() {
   const T = useTheme();
@@ -52,7 +54,7 @@ function HalfAngle() {
                 </div>
               );
             })}
-            <div className="tiny dim">Axis fixed at <M>û</M> = (0.124, 0.616, 0.778), the axis for α 30°, β 20°, γ 10°.</div>
+            <div className="tiny dim">Axis fixed at <M>û</M> = ({U.map((v) => v.toFixed(3)).join(", ")}), the axis for α 50°, β 10°, γ 40°.</div>
           </div>
         </div>
         <label style={{ display: "block", marginTop: 8 }}>
@@ -71,16 +73,21 @@ function VectorPart() {
   const [th, setTh] = useState(72);
   const s2 = Math.sin((th * Math.PI) / 360);
   const q = U.map((v) => v * s2);
-  const P = (x, y, z) => [230 - x * 90 + y * 140, 220 - z * 150 + x * 55];
+  const P = (x, y, z) => [235 - x * 120 + y * 185, 250 - z * 200 + x * 72];
   const o = P(0, 0, 0), uT = P(...U), qT = P(...q);
   const feet = [P(q[0], 0, 0), P(0, q[1], 0), P(0, 0, q[2])];
-  const off = [[-60, 22], [10, 22], [-60, 6]];
   const sans = { fontFamily: "var(--sans)", fontWeight: 700 };
+  // q1 sits above the X axis, q2 under the Y axis, q3 left of the Z axis, each kept clear of the origin
+  const labAt = [
+    { x: feet[0][0] - 12, y: Math.max(feet[0][1] - 10, o[1] + 10), anchor: "end" },
+    { x: Math.max(feet[1][0], o[0] + 46), y: feet[1][1] + 26, anchor: "middle" },
+    { x: feet[2][0] - 14, y: Math.min(feet[2][1] + 5, o[1] - 30), anchor: "end" },
+  ];
   return (
     <Fig caption="Both dials on this page go all the way to 360°. Past 180°, sin(θ/2) shrinks again while q₄ goes negative: that's the −q copy of a smaller turn the other way. Start with the unit axis û (amber). Shrink it to length sin(θ/2) (pink). The shadows of that shorter arrow on X, Y and Z are q₁, q₂ and q₃. So q₁ is just uₓ scaled by sin(θ/2), and the same for the other two.">
       <div className="panel">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-          <svg viewBox="0 0 440 290" style={{ flex: "1 1 280px", maxWidth: 460 }} role="img" aria-label="The axis u and the shorter vector u times sin of theta over 2, with its components q1, q2, q3">
+          <svg viewBox="0 0 490 372" style={{ flex: "1 1 400px", maxWidth: 520 }} role="img" aria-label="The axis u and the shorter vector u times sin of theta over 2, with its components q1, q2, q3">
             {[[1.25, 0, 0, 0, "X"], [0, 1.2, 0, 1, "Y"], [0, 0, 1.15, 2, "Z"]].map(([x, y, z, i, nm]) => {
               const e = P(x, y, z);
               return (
@@ -90,20 +97,20 @@ function VectorPart() {
                 </g>
               );
             })}
-            <line x1={o[0]} y1={o[1]} x2={uT[0]} y2={uT[1]} stroke={T.rep.sar} strokeWidth="3" strokeDasharray="7 5" />
+            <line x1={o[0]} y1={o[1]} x2={uT[0]} y2={uT[1]} stroke={T.rep.sar} strokeWidth="3.5" strokeDasharray="7 5" />
             <circle cx={uT[0]} cy={uT[1]} r="5" fill={T.rep.sar} />
-            <text x={uT[0] + 8} y={uT[1] - 4} fill={T.rep.sar} fontSize="20" style={{ fontFamily: "Times New Roman", fontStyle: "italic", fontWeight: 700 }}>û</text>
+            <text x={uT[0] + 9} y={uT[1] - 6} fill={T.rep.sar} fontSize="24" style={{ fontFamily: "Times New Roman", fontStyle: "italic", fontWeight: 700, ...halo(T) }}>û</text>
             {feet.map((f, i) => (
               <g key={i}>
                 <line x1={o[0]} y1={o[1]} x2={f[0]} y2={f[1]} stroke={T.axis[i]} strokeWidth="8" strokeLinecap="round" opacity=".85" />
                 <line x1={qT[0]} y1={qT[1]} x2={f[0]} y2={f[1]} stroke={T.dim} strokeWidth="1.6" strokeDasharray="4 4" />
                 <circle cx={f[0]} cy={f[1]} r="5" fill={T.axis[i]} />
-                <text x={f[0] + off[i][0]} y={f[1] + off[i][1]} fill={T.axis[i]} fontSize="14" style={sans}>q{"₁₂₃"[i]} = {q[i].toFixed(3)}</text>
+                <text x={labAt[i].x} y={labAt[i].y} textAnchor={labAt[i].anchor} fill={T.axis[i]} fontSize="17" style={{ ...sans, ...halo(T) }}>q{"₁₂₃"[i]} = {q[i].toFixed(3)}</text>
               </g>
             ))}
             <line x1={o[0]} y1={o[1]} x2={qT[0]} y2={qT[1]} stroke={T.rep.quat} strokeWidth="5" strokeLinecap="round" />
             <circle cx={qT[0]} cy={qT[1]} r="6" fill={T.rep.quat} />
-            <text x={qT[0] + 10} y={qT[1] + 14} fill={T.rep.quat} fontSize="14" style={sans}>û sin(θ/2)</text>
+            <text x={qT[0] + 12} y={qT[1] + (Math.abs(s2) > 0.8 ? 18 : 5)} fill={T.rep.quat} fontSize="17" style={{ ...sans, ...halo(T) }}>û sin(θ/2)</text>
           </svg>
           <div style={{ flex: "1 1 220px" }} className="num small">
             <div style={{ lineHeight: 2 }}>
@@ -133,7 +140,7 @@ function VectorPart() {
 function ChainDiagram() {
   const T = useTheme();
   const tri = (x, rot, label, col) => (
-    <g transform={`translate(${x} 120)`}>
+    <g transform={`translate(${x} 150)`}>
       <g transform={`rotate(${rot})`}>
         <line x1="0" y1="0" x2="44" y2="0" stroke={T.axis[0]} strokeWidth="3.5" strokeLinecap="round" />
         <line x1="0" y1="0" x2="0" y2="-44" stroke={T.axis[2]} strokeWidth="3.5" strokeLinecap="round" />
@@ -153,15 +160,15 @@ function ChainDiagram() {
   return (
     <Fig caption="Each arrow is one DCM. Going 1 → 2 → 3 is the same as going 1 → 3 directly, so [Q₁₃] = [Q₂₃][Q₁₂]. The slew you do first sits on the right, next to the vector.">
       <div className="panel">
-        <svg viewBox="0 0 600 210" role="img" aria-label="Frames 1, 2 and 3 with arrows Q12, Q23 and the combined Q13">
-          {tri(90, 0, "Frame 1", T.inertial)}
-          {tri(300, -35, "Frame 2", T.inter[1])}
-          {tri(510, -80, "Frame 3", T.rep.dcm)}
-          {arrow(150, 260, 110, "[Q₁₂]", T.dim)}
-          {arrow(360, 470, 110, "[Q₂₃]", T.dim)}
-          <path d="M 100 60 C 200 -10, 400 -10, 500 56" fill="none" stroke={T.rep.dcm} strokeWidth="3" />
-          <polygon points="0,-6 12,0 0,6" fill={T.rep.dcm} transform="translate(498 54) rotate(40)" />
-          <text x="300" y="28" textAnchor="middle" fill={T.rep.dcm} fontSize="17" style={{ fontFamily: "Times New Roman", fontStyle: "italic", fontWeight: 700 }}>[Q₁₃] = [Q₂₃] [Q₁₂]</text>
+        <svg viewBox="0 0 760 240" role="img" aria-label="Frames 1, 2 and 3 with arrows Q12, Q23 and the combined Q13">
+          {tri(110, 0, "Frame 1", T.inertial)}
+          {tri(380, -35, "Frame 2", T.inter[1])}
+          {tri(650, -80, "Frame 3", T.rep.dcm)}
+          {arrow(185, 305, 150, "[Q₁₂]", T.dim)}
+          {arrow(455, 575, 150, "[Q₂₃]", T.dim)}
+          <path d="M 110 78 C 220 -6, 540 -6, 640 70" fill="none" stroke={T.rep.dcm} strokeWidth="3" />
+          <polygon points="-12,-6 0,0 -12,6" fill={T.rep.dcm} transform="translate(644 73) rotate(37)" />
+          <text x="380" y="30" textAnchor="middle" fill={T.rep.dcm} fontSize="17" style={{ fontFamily: "Times New Roman", fontStyle: "italic", fontWeight: 700 }}>[Q₁₃] = [Q₂₃] [Q₁₂]</text>
         </svg>
       </div>
     </Fig>

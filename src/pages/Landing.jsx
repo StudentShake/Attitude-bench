@@ -92,9 +92,9 @@ export default function Landing() {
     <Page>
       <section className="wrap hero">
         <div className="hero-copy rise">
-          <h1>
-            Spin a spacecraft.<br />
-            <span className="hl">Watch the math follow.</span>
+          <h1 className="sad">
+            <span><b>S</b>pacecraft <b>A</b>ttitude <b>D</b>ynamics</span>{" "}
+            <span className="hl">doesn&apos;t have to be S.A.D.</span>
           </h1>
           <p className="lede" style={{ margin: "18px 0 26px", maxWidth: 520 }}>
             Attitude Bench shows one orientation four ways at once: the DCM, Euler angles, the single-axis
